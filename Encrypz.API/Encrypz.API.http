@@ -1,0 +1,6 @@
+@Encrypz.API_HostAddress = http://localhost:5207
+
+GET {{Encrypz.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

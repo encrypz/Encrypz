@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Encrypz.API/Encrypz.API.csproj" />
+  <Project Path="Encrypz.Core/Encrypz.Core.csproj" />
+  <Project Path="Encrypz.Infrastructure/Encrypz.Infrastructure.csproj" />
+</Solution>
