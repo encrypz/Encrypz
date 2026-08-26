@@ -1,0 +1,9 @@
+.encrypz-card {
+  transition: transform var(--transition-normal), box-shadow var(--transition-normal);
+}
+
+.encrypz-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px 0 rgba(0, 240, 255, 0.15);
+  border-color: rgba(0, 240, 255, 0.2);
+}

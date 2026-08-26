@@ -1,0 +1,86 @@
+.encrypz-auth-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: var(--spacing-xl);
+  width: 100%;
+}
+
+.auth-hero {
+  text-align: center;
+  margin-bottom: var(--spacing-xl);
+}
+
+.auth-hero h1 {
+  font-size: 4rem;
+  background: linear-gradient(135deg, var(--text-primary) 0%, var(--primary-color) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: var(--spacing-sm);
+}
+
+.subtitle {
+  font-size: 1.25rem;
+  color: var(--text-secondary);
+}
+
+.crypto-animation {
+  margin-top: var(--spacing-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  color: var(--success-color);
+  font-size: 0.875rem;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: rgba(46, 213, 115, 0.1);
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(46, 213, 115, 0.2);
+}
+
+.lock-icon {
+  width: 12px;
+  height: 12px;
+  background-color: var(--success-color);
+  mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>') no-repeat center;
+  -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>') no-repeat center;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 440px;
+}
+
+.auth-desc {
+  color: var(--text-secondary);
+  margin-bottom: var(--spacing-lg);
+  font-size: 0.95rem;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.submit-btn {
+  margin-top: var(--spacing-md);
+  width: 100%;
+}
+
+.auth-toggle {
+  margin-top: var(--spacing-lg);
+  text-align: center;
+  border-top: 1px solid var(--surface-border);
+  padding-top: var(--spacing-md);
+}
+
+@media (max-width: 480px) {
+  .encrypz-auth-container {
+    padding: var(--spacing-md);
+  }
+  .auth-hero h1 {
+    font-size: 3rem;
+  }
+}
