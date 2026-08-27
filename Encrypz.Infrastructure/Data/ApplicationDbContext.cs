@@ -40,8 +40,8 @@ namespace Encrypz.Infrastructure.Data
                       .HasColumnType("VARBINARY(512)")
                       .IsRequired();
 
-                entity.Property(e => e.Payload)
-                      .HasColumnType("LONGBLOB")
+                entity.Property(e => e.GoogleDriveFileId)
+                      .HasMaxLength(256)
                       .IsRequired();
 
                 entity.Property(e => e.InitializationVector)

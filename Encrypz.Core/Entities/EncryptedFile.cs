@@ -7,7 +7,7 @@ namespace Encrypz.Core.Entities
         public Guid Id { get; set; }
         
         public byte[] EncryptedFileName { get; set; } = Array.Empty<byte>();
-        public byte[] Payload { get; set; } = Array.Empty<byte>();
+        public string GoogleDriveFileId { get; set; } = string.Empty;
         public byte[] InitializationVector { get; set; } = Array.Empty<byte>();
         public byte[] AuthenticationTag { get; set; } = Array.Empty<byte>();
 

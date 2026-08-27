@@ -1,19 +1,17 @@
-import { useState } from 'react';
-import { Auth } from './pages/Auth';
-import { Dashboard } from './pages/Dashboard';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Login } from './pages/Login';
+import { Vault } from './pages/Vault';
 
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-
   return (
-    <>
-      {!isAuthenticated ? (
-        <Auth onLogin={() => setIsAuthenticated(true)} />
-      ) : (
-        <Dashboard onLogout={() => setIsAuthenticated(false)} />
-      )}
-    </>
-  );
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Navigate to="/login" replace />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/vault" element={<Vault />} />
+      </Routes>
+    </BrowserRouter>
+  )
 }
 
 export default App;

@@ -8,6 +8,8 @@ namespace Encrypz.Core.Entities
         public Guid Id { get; set; }
         public string Username { get; set; } = string.Empty;
         
+        public string? GoogleRefreshToken { get; set; }
+
         // Navigation property
         public ICollection<EncryptedFile> EncryptedFiles { get; set; } = new List<EncryptedFile>();
     }
