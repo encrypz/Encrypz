@@ -7,6 +7,7 @@ using Google.Apis.Util.Store;
 using Microsoft.Extensions.Configuration;
 using System;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace Encrypz.Infrastructure.Services
@@ -80,14 +81,41 @@ namespace Encrypz.Infrastructure.Services
             return response.RefreshToken;
         }
 
+        private async Task<string> GetOrCreateFolderAsync(DriveService service, string folderName)
+        {
+            var request = service.Files.List();
+            request.Q = $"mimeType='application/vnd.google-apps.folder' and name='{folderName}' and trashed=false";
+            request.Spaces = "drive";
+            request.Fields = "files(id, name)";
+            var result = await request.ExecuteAsync();
+
+            var folder = result.Files.FirstOrDefault();
+            if (folder != null)
+            {
+                return folder.Id;
+            }
+
+            var fileMetadata = new Google.Apis.Drive.v3.Data.File()
+            {
+                Name = folderName,
+                MimeType = "application/vnd.google-apps.folder"
+            };
+            var createRequest = service.Files.Create(fileMetadata);
+            createRequest.Fields = "id";
+            var createdFolder = await createRequest.ExecuteAsync();
+            return createdFolder.Id;
+        }
+
         public async Task<string> UploadFileAsync(string refreshToken, byte[] fileBytes, string fileName)
         {
             var service = GetDriveService(refreshToken);
 
+            var folderId = await GetOrCreateFolderAsync(service, "Encrypz");
+
             var fileMetadata = new Google.Apis.Drive.v3.Data.File()
             {
                 Name = fileName,
-                Parents = new[] { "root" } // Store in the root of the user's Drive
+                Parents = new[] { folderId } // Store in the Encrypz folder
             };
 
             using var stream = new MemoryStream(fileBytes);
