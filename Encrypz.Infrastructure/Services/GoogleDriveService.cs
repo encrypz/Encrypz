@@ -18,6 +18,7 @@ namespace Encrypz.Infrastructure.Services
         Task<string> ExchangeCodeForRefreshTokenAsync(string code, string redirectUri);
         Task<string> UploadFileAsync(string refreshToken, byte[] fileBytes, string fileName);
         Task<byte[]> DownloadFileAsync(string refreshToken, string fileId);
+        Task DeleteFileAsync(string refreshToken, string fileId);
     }
 
     public class GoogleDriveService : IGoogleDriveService
@@ -140,6 +141,25 @@ namespace Encrypz.Infrastructure.Services
             await request.DownloadAsync(stream);
 
             return stream.ToArray();
+        }
+
+        public async Task DeleteFileAsync(string refreshToken, string fileId)
+        {
+            var service = GetDriveService(refreshToken);
+            
+            try
+            {
+                var request = service.Files.Delete(fileId);
+                await request.ExecuteAsync();
+            }
+            catch (Exception ex)
+            {
+                // If file doesn't exist on Google Drive anymore, we still want to proceed so it can be deleted from DB
+                if (!ex.Message.Contains("File not found"))
+                {
+                    throw;
+                }
+            }
         }
     }
 }

@@ -84,5 +84,32 @@ namespace Encrypz.API.Controllers
 
             return Ok(dto);
         }
+
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteFile(Guid id)
+        {
+            var file = await _context.EncryptedFiles.Include(f => f.User).FirstOrDefaultAsync(f => f.Id == id);
+            if (file == null) return NotFound("File not found.");
+
+            // If it's a new file with a Google Drive ID, delete it from Google Drive first
+            if (!string.IsNullOrEmpty(file.GoogleDriveFileId) && !string.IsNullOrEmpty(file.User.GoogleRefreshToken))
+            {
+                try
+                {
+                    await _googleDriveService.DeleteFileAsync(file.User.GoogleRefreshToken, file.GoogleDriveFileId);
+                }
+                catch (Exception ex)
+                {
+                    // Log the error but proceed with DB deletion so it's not orphaned in the UI
+                    Console.WriteLine($"Failed to delete file from Google Drive: {ex.Message}");
+                }
+            }
+
+            // Remove from database
+            _context.EncryptedFiles.Remove(file);
+            await _context.SaveChangesAsync();
+
+            return NoContent();
+        }
     }
 }
