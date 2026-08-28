@@ -5,6 +5,8 @@ import { AppLayout } from './components/AppLayout';
 import { MyVault } from './pages/MyVault';
 import { Upload } from './pages/Upload';
 
+import { Profile } from './pages/Profile';
+
 function App() {
   // Simple auth check wrapper
   const RequireAuth = ({ children }: { children: JSX.Element }) => {
@@ -26,6 +28,7 @@ function App() {
         <Route element={<RequireAuth><AppLayout /></RequireAuth>}>
           <Route path="/vault" element={<MyVault />} />
           <Route path="/upload" element={<Upload />} />
+          <Route path="/profile" element={<Profile />} />
         </Route>
       </Routes>
     </BrowserRouter>

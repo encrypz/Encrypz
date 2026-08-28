@@ -100,5 +100,25 @@ namespace Encrypz.API.Controllers
             // Redirect back to frontend with success flag
             return Redirect("http://localhost:5173/vault?connected=true");
         }
+
+        [HttpGet("user/{userId}")]
+        public async Task<IActionResult> GetUserProfile(Guid userId)
+        {
+            var user = await _context.Users
+                .Include(u => u.EncryptedFiles)
+                .FirstOrDefaultAsync(u => u.Id == userId);
+                
+            if (user == null) return NotFound("User not found.");
+
+            var folderCount = await _context.Folders.CountAsync(f => f.UserId == userId);
+
+            return Ok(new
+            {
+                Username = user.Username,
+                IsGoogleDriveConnected = !string.IsNullOrEmpty(user.GoogleRefreshToken),
+                FileCount = user.EncryptedFiles.Count,
+                FolderCount = folderCount
+            });
+        }
     }
 }
