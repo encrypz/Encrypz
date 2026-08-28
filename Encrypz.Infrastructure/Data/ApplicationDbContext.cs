@@ -12,6 +12,7 @@ namespace Encrypz.Infrastructure.Data
 
         public DbSet<User> Users { get; set; } = null!;
         public DbSet<EncryptedFile> EncryptedFiles { get; set; } = null!;
+        public DbSet<Folder> Folders { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -29,12 +30,6 @@ namespace Encrypz.Infrastructure.Data
             {
                 entity.HasKey(e => e.Id);
                 
-                // One-to-many relationship
-                entity.HasOne(e => e.User)
-                      .WithMany(u => u.EncryptedFiles)
-                      .HasForeignKey(e => e.UserId)
-                      .OnDelete(DeleteBehavior.Cascade);
-
                 // Map cryptographic byte arrays to MySQL VARBINARY and LONGBLOB
                 entity.Property(e => e.EncryptedFileName)
                       .HasColumnType("VARBINARY(512)")
@@ -52,6 +47,31 @@ namespace Encrypz.Infrastructure.Data
                       .HasColumnType("VARBINARY(16)")
                       .IsRequired();
             });
+
+            // Relationships
+            modelBuilder.Entity<EncryptedFile>()
+                .HasOne(f => f.User)
+                .WithMany(u => u.EncryptedFiles)
+                .HasForeignKey(f => f.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<Folder>()
+                .HasOne(f => f.User)
+                .WithMany()
+                .HasForeignKey(f => f.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<Folder>()
+                .HasOne(f => f.ParentFolder)
+                .WithMany(f => f.SubFolders)
+                .HasForeignKey(f => f.ParentFolderId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<EncryptedFile>()
+                .HasOne(f => f.Folder)
+                .WithMany(f => f.Files)
+                .HasForeignKey(f => f.FolderId)
+                .OnDelete(DeleteBehavior.SetNull);
         }
     }
 }

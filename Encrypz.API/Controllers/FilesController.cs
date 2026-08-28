@@ -40,7 +40,8 @@ namespace Encrypz.API.Controllers
                 GoogleDriveFileId = driveFileId,
                 InitializationVector = Convert.FromBase64String(dto.InitializationVector),
                 AuthenticationTag = Convert.FromBase64String(dto.AuthenticationTag),
-                UserId = dto.UserId
+                UserId = dto.UserId,
+                FolderId = dto.FolderId
             };
 
             _context.EncryptedFiles.Add(file);
@@ -50,14 +51,25 @@ namespace Encrypz.API.Controllers
         }
 
         [HttpGet("user/{userId}")]
-        public async Task<IActionResult> ListFiles(Guid userId)
+        public async Task<IActionResult> ListFiles(Guid userId, [FromQuery] Guid? folderId)
         {
-            var files = await _context.EncryptedFiles
-                .Where(f => f.UserId == userId)
+            var query = _context.EncryptedFiles.Where(f => f.UserId == userId);
+
+            if (folderId.HasValue)
+            {
+                query = query.Where(f => f.FolderId == folderId.Value);
+            }
+            else
+            {
+                query = query.Where(f => f.FolderId == null);
+            }
+
+            var files = await query
                 .Select(f => new FileListDto
                 {
                     Id = f.Id,
-                    EncryptedFileName = Convert.ToBase64String(f.EncryptedFileName)
+                    EncryptedFileName = Convert.ToBase64String(f.EncryptedFileName),
+                    FolderId = f.FolderId
                 })
                 .ToListAsync();
 

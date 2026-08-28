@@ -16,5 +16,8 @@ namespace Encrypz.Core.Entities
         
         // Navigation property
         public User User { get; set; } = null!;
+
+        public Guid? FolderId { get; set; }
+        public Folder? Folder { get; set; }
     }
 }
