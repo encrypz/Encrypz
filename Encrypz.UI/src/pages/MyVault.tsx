@@ -145,7 +145,7 @@ export const MyVault = () => {
         try {
             const key = await deriveKey(masterPassword, username);
             const folderNameBytes = new TextEncoder().encode(folderName);
-            const { encryptedData, iv, authTag } = await encryptData(folderNameBytes, key);
+            const { payload: encryptedData, iv, authTag } = await encryptData(folderNameBytes, key);
 
             await axios.post(`${API_BASE_URL}/Folders`, {
                 userId,

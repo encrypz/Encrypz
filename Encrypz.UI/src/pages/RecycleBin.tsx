@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+
 import axios from 'axios';
 import { 
     deriveKey, 
@@ -26,7 +26,7 @@ interface FolderItem {
 }
 
 export const RecycleBin = () => {
-    const navigate = useNavigate();
+    
     const userId = sessionStorage.getItem('userId');
     const masterPassword = sessionStorage.getItem('masterPassword');
     const username = sessionStorage.getItem('username'); 
@@ -36,7 +36,7 @@ export const RecycleBin = () => {
     const [decryptedNames, setDecryptedNames] = useState<Record<string, string>>({});
     const [decryptedThumbnails, setDecryptedThumbnails] = useState<Record<string, string>>({});
     const [loading, setLoading] = useState(false);
-    const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
+    
 
     useEffect(() => {
         if (userId && masterPassword && username) {
@@ -44,11 +44,7 @@ export const RecycleBin = () => {
         }
     }, [userId]);
 
-    useEffect(() => {
-        const handleClickOutside = () => setActiveDropdown(null);
-        document.addEventListener('click', handleClickOutside);
-        return () => document.removeEventListener('click', handleClickOutside);
-    }, []);
+
 
     const fetchContents = async () => {
         try {
@@ -151,10 +147,7 @@ export const RecycleBin = () => {
         } finally { setLoading(false); }
     };
 
-    const toggleDropdown = (e: React.MouseEvent, id: string) => {
-        e.stopPropagation();
-        setActiveDropdown(activeDropdown === id ? null : id);
-    };
+
 
     const getFileCategory = (filename: string) => {
         const ext = filename.split('.').pop()?.toLowerCase() || '';
@@ -195,7 +188,7 @@ export const RecycleBin = () => {
                                         <path d="M.54 3.87.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.826a2 2 0 0 1-1.991-1.819l-.637-7a1.99 1.99 0 0 1 .342-1.31zM2.19 4a1 1 0 0 0-.996 1.09l.637 7a1 1 0 0 0 .995.91h10.348a1 1 0 0 0 .995-.91l.637-7A1 1 0 0 0 13.81 4H2.19zm4.69-1.707A1 1 0 0 0 6.172 2H2.5a1 1 0 0 0-1 .981l.006.139C1.72 3.042 1.95 3 2.19 3h5.396l-.707-.707z"/>
                                     </svg>
                                 </div>
-                                <div className="gallery-item-title"><strike>{decryptedNames[f.id] || f.id}</strike></div>
+                                <div className="gallery-item-title"><del>{decryptedNames[f.id] || f.id}</del></div>
                                 <div className="gallery-item-overlay">
                                     <button onClick={(e) => { e.stopPropagation(); handleRestoreFolder(f.id); }} className="gallery-action-btn">Restore</button>
                                     <button onClick={(e) => { e.stopPropagation(); handlePermanentDeleteFolder(f.id); }} className="gallery-action-btn danger">Delete Forever</button>
@@ -215,7 +208,7 @@ export const RecycleBin = () => {
                                         <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="var(--text-muted)" viewBox="0 0 16 16"><path d="M4 0h5.293A1 1 0 0 1 10 .293L13.707 4a1 1 0 0 1 .293.707V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2m5.5 1.5v2a1 1 0 0 0 1 1h2z"/></svg>
                                     )}
                                 </div>
-                                <div className="gallery-item-title"><strike>{decryptedNames[f.id] || f.id}</strike></div>
+                                <div className="gallery-item-title"><del>{decryptedNames[f.id] || f.id}</del></div>
                                 <div className="gallery-item-overlay">
                                     <button onClick={(e) => { e.stopPropagation(); handleRestoreFile(f.id); }} className="gallery-action-btn">Restore</button>
                                     <button onClick={(e) => { e.stopPropagation(); handlePermanentDeleteFile(f.id); }} className="gallery-action-btn danger">Delete Forever</button>

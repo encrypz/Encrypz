@@ -8,8 +8,10 @@ import { RecycleBin } from './pages/RecycleBin';
 
 import { Profile } from './pages/Profile';
 
+import type { ReactNode } from 'react';
+
 function App() {
-  const RequireAuth = ({ children }: { children: JSX.Element }) => {
+  const RequireAuth = ({ children }: { children: ReactNode }) => {
     const userId = sessionStorage.getItem('userId');
     const isConnected = sessionStorage.getItem('isGoogleDriveConnected') === 'true';
     
