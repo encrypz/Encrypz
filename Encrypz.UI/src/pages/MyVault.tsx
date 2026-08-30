@@ -11,7 +11,7 @@ import {
 } from '../utils/crypto';
 import { generateThumbnailBytes } from '../utils/media';
 
-const API_BASE_URL = 'http://localhost:5207/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5207/api';
 
 interface FileItem {
     id: string;

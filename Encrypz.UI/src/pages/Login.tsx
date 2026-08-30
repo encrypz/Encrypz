@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
-const API_BASE_URL = 'http://localhost:5207/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5207/api';
 
 export const Login = () => {
     const [isRegister, setIsRegister] = useState(false);

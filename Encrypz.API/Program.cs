@@ -27,11 +27,15 @@ public class Program
         builder.Services.AddScoped<IGoogleDriveService, GoogleDriveService>();
         builder.Services.AddHostedService<RecycleBinCleanupService>();
 
+        var allowedOrigins = builder.Configuration["Frontend:AllowedOrigins"]
+            ?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            ?? new[] { "http://localhost:5173", "http://localhost:5174" };
+
         builder.Services.AddCors(options =>
         {
             options.AddPolicy("AllowFrontend", policy =>
             {
-                policy.WithOrigins("http://localhost:5173", "http://localhost:5174")
+                policy.WithOrigins(allowedOrigins)
                       .AllowAnyHeader()
                       .AllowAnyMethod();
             });

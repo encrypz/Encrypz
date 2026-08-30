@@ -9,7 +9,7 @@ import {
     stringToUint8Array 
 } from '../utils/crypto';
 
-const API_BASE_URL = 'http://localhost:5207/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5207/api';
 
 
 
