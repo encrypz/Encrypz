@@ -40,8 +40,13 @@ namespace Encrypz.API.Controllers
                 GoogleDriveFileId = driveFileId,
                 InitializationVector = Convert.FromBase64String(dto.InitializationVector),
                 AuthenticationTag = Convert.FromBase64String(dto.AuthenticationTag),
+                FileSize = dto.FileSize,
+                UploadedAt = DateTime.UtcNow,
                 UserId = dto.UserId,
-                FolderId = dto.FolderId
+                FolderId = dto.FolderId,
+                EncryptedThumbnail = string.IsNullOrEmpty(dto.EncryptedThumbnail) ? null : Convert.FromBase64String(dto.EncryptedThumbnail),
+                ThumbnailIv = string.IsNullOrEmpty(dto.ThumbnailIv) ? null : Convert.FromBase64String(dto.ThumbnailIv),
+                ThumbnailAuthTag = string.IsNullOrEmpty(dto.ThumbnailAuthTag) ? null : Convert.FromBase64String(dto.ThumbnailAuthTag)
             };
 
             _context.EncryptedFiles.Add(file);
@@ -53,7 +58,7 @@ namespace Encrypz.API.Controllers
         [HttpGet("user/{userId}")]
         public async Task<IActionResult> ListFiles(Guid userId, [FromQuery] Guid? folderId)
         {
-            var query = _context.EncryptedFiles.Where(f => f.UserId == userId);
+            var query = _context.EncryptedFiles.Where(f => f.UserId == userId && !f.IsDeleted);
 
             if (folderId.HasValue)
             {
@@ -69,7 +74,12 @@ namespace Encrypz.API.Controllers
                 {
                     Id = f.Id,
                     EncryptedFileName = Convert.ToBase64String(f.EncryptedFileName),
-                    FolderId = f.FolderId
+                FileSize = f.FileSize,
+                UploadedAt = f.UploadedAt,
+                    FolderId = f.FolderId,
+                    EncryptedThumbnail = f.EncryptedThumbnail != null ? Convert.ToBase64String(f.EncryptedThumbnail) : null,
+                    ThumbnailIv = f.ThumbnailIv != null ? Convert.ToBase64String(f.ThumbnailIv) : null,
+                    ThumbnailAuthTag = f.ThumbnailAuthTag != null ? Convert.ToBase64String(f.ThumbnailAuthTag) : null
                 })
                 .ToListAsync();
 
@@ -97,13 +107,59 @@ namespace Encrypz.API.Controllers
             return Ok(dto);
         }
 
+        [HttpGet("deleted/{userId}")]
+        public async Task<IActionResult> GetDeletedFiles(Guid userId)
+        {
+            var files = await _context.EncryptedFiles
+                .Where(f => f.UserId == userId && f.IsDeleted)
+                .Select(f => new FileListDto
+                {
+                    Id = f.Id,
+                    EncryptedFileName = Convert.ToBase64String(f.EncryptedFileName),
+                FileSize = f.FileSize,
+                UploadedAt = f.UploadedAt,
+                    FolderId = f.FolderId,
+                    EncryptedThumbnail = f.EncryptedThumbnail != null ? Convert.ToBase64String(f.EncryptedThumbnail) : null,
+                    ThumbnailIv = f.ThumbnailIv != null ? Convert.ToBase64String(f.ThumbnailIv) : null,
+                    ThumbnailAuthTag = f.ThumbnailAuthTag != null ? Convert.ToBase64String(f.ThumbnailAuthTag) : null
+                })
+                .ToListAsync();
+
+            return Ok(files);
+        }
+
+        [HttpPost("{id}/restore")]
+        public async Task<IActionResult> RestoreFile(Guid id)
+        {
+            var file = await _context.EncryptedFiles.FindAsync(id);
+            if (file == null) return NotFound("File not found.");
+            
+            file.IsDeleted = false;
+            file.DeletedAt = null;
+            await _context.SaveChangesAsync();
+
+            return Ok();
+        }
+
         [HttpDelete("{id}")]
-        public async Task<IActionResult> DeleteFile(Guid id)
+        public async Task<IActionResult> DeleteFile(Guid id) // Soft delete
+        {
+            var file = await _context.EncryptedFiles.FindAsync(id);
+            if (file == null) return NotFound("File not found.");
+
+            file.IsDeleted = true;
+            file.DeletedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+
+            return NoContent();
+        }
+
+        [HttpDelete("{id}/permanent")]
+        public async Task<IActionResult> PermanentDeleteFile(Guid id)
         {
             var file = await _context.EncryptedFiles.Include(f => f.User).FirstOrDefaultAsync(f => f.Id == id);
             if (file == null) return NotFound("File not found.");
 
-            // If it's a new file with a Google Drive ID, delete it from Google Drive first
             if (!string.IsNullOrEmpty(file.GoogleDriveFileId) && !string.IsNullOrEmpty(file.User.GoogleRefreshToken))
             {
                 try
@@ -112,12 +168,10 @@ namespace Encrypz.API.Controllers
                 }
                 catch (Exception ex)
                 {
-                    // Log the error but proceed with DB deletion so it's not orphaned in the UI
                     Console.WriteLine($"Failed to delete file from Google Drive: {ex.Message}");
                 }
             }
 
-            // Remove from database
             _context.EncryptedFiles.Remove(file);
             await _context.SaveChangesAsync();
 

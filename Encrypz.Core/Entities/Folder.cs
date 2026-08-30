@@ -19,5 +19,8 @@ namespace Encrypz.Core.Entities
 
         public ICollection<Folder> SubFolders { get; set; }
         public ICollection<EncryptedFile> Files { get; set; }
+
+        public bool IsDeleted { get; set; } = false;
+        public DateTime? DeletedAt { get; set; }
     }
 }

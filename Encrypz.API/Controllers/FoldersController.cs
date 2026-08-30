@@ -51,7 +51,7 @@ namespace Encrypz.API.Controllers
         [HttpGet("user/{userId}")]
         public async Task<IActionResult> GetFolders(Guid userId, [FromQuery] Guid? parentId)
         {
-            var query = _context.Folders.Where(f => f.UserId == userId);
+            var query = _context.Folders.Where(f => f.UserId == userId && !f.IsDeleted);
             
             if (parentId.HasValue)
             {

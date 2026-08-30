@@ -98,7 +98,7 @@ namespace Encrypz.API.Controllers
             }
 
             // Redirect back to frontend with success flag
-            return Redirect("http://localhost:5173/vault?connected=true");
+            return Redirect("http://localhost:5173/connect?connected=true");
         }
 
         [HttpGet("user/{userId}")]

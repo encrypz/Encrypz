@@ -4,6 +4,7 @@ using Encrypz.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Encrypz.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260830041505_AddThumbnailsToFile")]
+    partial class AddThumbnailsToFile
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -32,18 +35,12 @@ namespace Encrypz.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("VARBINARY(16)");
 
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime(6)");
-
                     b.Property<byte[]>("EncryptedFileName")
                         .IsRequired()
                         .HasColumnType("VARBINARY(512)");
 
                     b.Property<byte[]>("EncryptedThumbnail")
                         .HasColumnType("longblob");
-
-                    b.Property<long>("FileSize")
-                        .HasColumnType("bigint");
 
                     b.Property<Guid?>("FolderId")
                         .HasColumnType("char(36)");
@@ -57,17 +54,11 @@ namespace Encrypz.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("VARBINARY(16)");
 
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("tinyint(1)");
-
                     b.Property<byte[]>("ThumbnailAuthTag")
                         .HasColumnType("longblob");
 
                     b.Property<byte[]>("ThumbnailIv")
                         .HasColumnType("longblob");
-
-                    b.Property<DateTime>("UploadedAt")
-                        .HasColumnType("datetime(6)");
 
                     b.Property<Guid>("UserId")
                         .HasColumnType("char(36)");
@@ -91,9 +82,6 @@ namespace Encrypz.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("longblob");
 
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime(6)");
-
                     b.Property<byte[]>("EncryptedFolderName")
                         .IsRequired()
                         .HasColumnType("longblob");
@@ -101,9 +89,6 @@ namespace Encrypz.Infrastructure.Migrations
                     b.Property<byte[]>("InitializationVector")
                         .IsRequired()
                         .HasColumnType("longblob");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("tinyint(1)");
 
                     b.Property<Guid?>("ParentFolderId")
                         .HasColumnType("char(36)");

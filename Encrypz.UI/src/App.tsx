@@ -4,13 +4,19 @@ import { ConnectDrive } from './pages/ConnectDrive';
 import { AppLayout } from './components/AppLayout';
 import { MyVault } from './pages/MyVault';
 import { Upload } from './pages/Upload';
+import { RecycleBin } from './pages/RecycleBin';
 
 import { Profile } from './pages/Profile';
 
 function App() {
-  // Simple auth check wrapper
   const RequireAuth = ({ children }: { children: JSX.Element }) => {
+    const userId = sessionStorage.getItem('userId');
     const isConnected = sessionStorage.getItem('isGoogleDriveConnected') === 'true';
+    
+    if (!userId) {
+      return <Navigate to="/login" replace />;
+    }
+    
     if (!isConnected) {
       return <Navigate to="/connect" replace />;
     }
@@ -27,6 +33,7 @@ function App() {
         {/* Protected Routes inside AppLayout */}
         <Route element={<RequireAuth><AppLayout /></RequireAuth>}>
           <Route path="/vault" element={<MyVault />} />
+          <Route path="/recycle-bin" element={<RecycleBin />} />
           <Route path="/upload" element={<Upload />} />
           <Route path="/profile" element={<Profile />} />
         </Route>

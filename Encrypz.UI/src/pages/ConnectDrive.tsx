@@ -1,19 +1,32 @@
 import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 
 const API_BASE_URL = 'http://localhost:5207/api';
 
 export const ConnectDrive = () => {
     const navigate = useNavigate();
+    const location = useLocation();
     const userId = sessionStorage.getItem('userId');
 
     useEffect(() => {
+        if (!userId) {
+            navigate('/login');
+            return;
+        }
+
+        const queryParams = new URLSearchParams(location.search);
+        if (queryParams.get('connected') === 'true') {
+            sessionStorage.setItem('isGoogleDriveConnected', 'true');
+            navigate('/vault');
+            return;
+        }
+
         // If already connected, redirect to vault
         if (sessionStorage.getItem('isGoogleDriveConnected') === 'true') {
             navigate('/vault');
         }
-    }, [navigate]);
+    }, [navigate, location, userId]);
 
     const handleConnectDrive = async () => {
         try {

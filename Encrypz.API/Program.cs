@@ -1,6 +1,7 @@
 using Encrypz.Infrastructure.Data;
 using Encrypz.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
+using Encrypz.API.Services;
 
 namespace Encrypz.API;
 
@@ -24,12 +25,13 @@ public class Program
         builder.Services.AddSwaggerGen();
         
         builder.Services.AddScoped<IGoogleDriveService, GoogleDriveService>();
+        builder.Services.AddHostedService<RecycleBinCleanupService>();
 
         builder.Services.AddCors(options =>
         {
             options.AddPolicy("AllowFrontend", policy =>
             {
-                policy.WithOrigins("http://localhost:5173")
+                policy.WithOrigins("http://localhost:5173", "http://localhost:5174")
                       .AllowAnyHeader()
                       .AllowAnyMethod();
             });

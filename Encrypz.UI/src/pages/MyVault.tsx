@@ -1,14 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
+import './Vault.css';
 import { 
-    deriveKey, 
+    deriveKey,
+    arrayBufferToBase64, 
     decryptData, 
-    encryptData,
     base64ToArrayBuffer, 
-    arrayBufferToBase64,
     uint8ArrayToString,
-    stringToUint8Array
+    encryptData
 } from '../utils/crypto';
+import { generateThumbnailBytes } from '../utils/media';
 
 const API_BASE_URL = 'http://localhost:5207/api';
 
@@ -16,6 +17,11 @@ interface FileItem {
     id: string;
     encryptedFileName: string;
     folderId: string | null;
+    fileSize?: number;
+    uploadedAt?: string;
+    encryptedThumbnail?: string | null;
+    thumbnailIv?: string | null;
+    thumbnailAuthTag?: string | null;
 }
 
 interface FolderItem {
@@ -24,54 +30,58 @@ interface FolderItem {
     parentFolderId: string | null;
 }
 
+type ViewMode = 'grid' | 'list';
+type FilterType = 'All' | 'Photos' | 'Videos' | 'Documents';
+
 export const MyVault = () => {
     const userId = sessionStorage.getItem('userId');
     const masterPassword = sessionStorage.getItem('masterPassword');
-    const username = sessionStorage.getItem('username'); // Used as salt
+    const username = sessionStorage.getItem('username'); 
 
     const [files, setFiles] = useState<FileItem[]>([]);
     const [folders, setFolders] = useState<FolderItem[]>([]);
     const [decryptedNames, setDecryptedNames] = useState<Record<string, string>>({});
-    const [loading, setLoading] = useState(false);
+    const [decryptedThumbnails, setDecryptedThumbnails] = useState<Record<string, string>>({});
     
-    // UI State
-    const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid');
-    const [searchQuery, setSearchQuery] = useState('');
-    const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
-    const [selectedCategory, setSelectedCategory] = useState<'All' | 'Photos' | 'Videos' | 'Documents'>('All');
-    
-    // Navigation State
     const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
-    const [breadcrumbs, setBreadcrumbs] = useState<{id: string | null, name: string}[]>([{id: null, name: 'My Vault'}]);
+    const [breadcrumbs, setBreadcrumbs] = useState<{id: string, name: string}[]>([]);
+    
+    const [loading, setLoading] = useState(false);
+    const [uploading, setUploading] = useState(false);
+    const [addMenuOpen, setAddMenuOpen] = useState(false);
+    
+    const [viewMode, setViewMode] = useState<ViewMode>('grid');
+    const [activeFilter, setActiveFilter] = useState<FilterType>('All');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [selectedItem, setSelectedItem] = useState<{type: 'file'|'folder', id: string} | null>(null);
 
-    // Modal State
-    const [previewData, setPreviewData] = useState<string | null>(null);
-    const [previewType, setPreviewType] = useState<string | null>(null);
-    const [previewName, setPreviewName] = useState<string | null>(null);
-    const [showNewFolderModal, setShowNewFolderModal] = useState(false);
-    const [newFolderName, setNewFolderName] = useState('');
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+        const onUpload = () => triggerUpload();
+        const onNewFolder = () => handleCreateFolder();
+        
+        document.addEventListener('trigger-upload', onUpload);
+        document.addEventListener('trigger-new-folder', onNewFolder);
+        return () => {
+            document.removeEventListener('trigger-upload', onUpload);
+            document.removeEventListener('trigger-new-folder', onNewFolder);
+        };
+    });
 
     useEffect(() => {
         if (userId && masterPassword && username) {
-            fetchContents();
+            fetchContents(currentFolderId);
         }
     }, [userId, currentFolderId]);
 
-    useEffect(() => {
-        const handleClickOutside = () => setActiveDropdown(null);
-        document.addEventListener('click', handleClickOutside);
-        return () => document.removeEventListener('click', handleClickOutside);
-    }, []);
-
-    const fetchContents = async () => {
+    const fetchContents = async (folderId: string | null) => {
         try {
             setLoading(true);
-            const folderParam = currentFolderId ? `?folderId=${currentFolderId}` : '';
-            const parentFolderParam = currentFolderId ? `?parentId=${currentFolderId}` : '';
-
+            setSelectedItem(null); // Clear selection on navigate
             const [filesRes, foldersRes] = await Promise.all([
-                axios.get(`${API_BASE_URL}/Files/user/${userId}${folderParam}`),
-                axios.get(`${API_BASE_URL}/Folders/user/${userId}${parentFolderParam}`)
+                axios.get(`${API_BASE_URL}/Files/user/${userId}${folderId ? `?folderId=${folderId}` : ''}`),
+                axios.get(`${API_BASE_URL}/Folders/user/${userId}${folderId ? `?parentId=${folderId}` : ''}`)
             ]);
 
             setFiles(filesRes.data);
@@ -86,189 +96,215 @@ export const MyVault = () => {
 
     const decryptNames = async (fileList: FileItem[], folderList: FolderItem[]) => {
         if (!masterPassword || !username) return;
-        
         const names: Record<string, string> = {};
+        const thumbnails: Record<string, string> = {};
+        const key = await deriveKey(masterPassword, username);
 
-        // Decrypt files
         for (const file of fileList) {
             try {
                 const fileNameBytes = base64ToArrayBuffer(file.encryptedFileName);
-                const fileName = uint8ArrayToString(fileNameBytes);
-                names[file.id] = fileName;
+                names[file.id] = uint8ArrayToString(fileNameBytes);
             } catch {
                 names[file.id] = `Encrypted File (${file.id.substring(0, 8)})`;
             }
-        }
 
-        // Decrypt folders
-        try {
-            const key = await deriveKey(masterPassword, username);
-            for (const folder of folderList) {
+            if (file.encryptedThumbnail && file.thumbnailIv && file.thumbnailAuthTag) {
                 try {
-                    const payloadBytes = base64ToArrayBuffer(folder.encryptedFolderName);
-                    const ivBytes = base64ToArrayBuffer((folder as any).initializationVector);
-                    const tagBytes = base64ToArrayBuffer((folder as any).authenticationTag);
-                    
-                    const decryptedBytes = await decryptData(payloadBytes, ivBytes, tagBytes, key);
-                    names[folder.id] = uint8ArrayToString(decryptedBytes);
-                } catch {
-                    names[folder.id] = `Encrypted Folder (${folder.id.substring(0, 8)})`;
-                }
+                    const thumbPayload = base64ToArrayBuffer(file.encryptedThumbnail);
+                    const thumbIv = base64ToArrayBuffer(file.thumbnailIv);
+                    const thumbTag = base64ToArrayBuffer(file.thumbnailAuthTag);
+                    const decryptedThumbBytes = await decryptData(thumbPayload, thumbIv, thumbTag, key);
+                    const blob = new Blob([decryptedThumbBytes], { type: 'image/jpeg' });
+                    thumbnails[file.id] = URL.createObjectURL(blob);
+                } catch (e) {}
             }
-        } catch (error) {
-            console.error("Folder decryption failed", error);
         }
+        setDecryptedThumbnails(thumbnails);
 
+        for (const folder of folderList) {
+            try {
+                const payloadBytes = base64ToArrayBuffer(folder.encryptedFolderName);
+                const ivBytes = base64ToArrayBuffer((folder as any).initializationVector);
+                const tagBytes = base64ToArrayBuffer((folder as any).authenticationTag);
+                const decryptedBytes = await decryptData(payloadBytes, ivBytes, tagBytes, key);
+                names[folder.id] = uint8ArrayToString(decryptedBytes);
+            } catch {
+                names[folder.id] = `Encrypted Folder (${folder.id.substring(0, 8)})`;
+            }
+        }
         setDecryptedNames(names);
     };
 
-    const handleCreateFolder = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!newFolderName.trim() || !masterPassword || !username) return;
+    const handleCreateFolder = async () => {
+        const folderName = prompt('Enter folder name:');
+        if (!folderName) return;
+        
+        if (!masterPassword || !username || !userId) return;
 
         setLoading(true);
         try {
             const key = await deriveKey(masterPassword, username);
-            const nameBytes = stringToUint8Array(newFolderName.trim());
-            const { payload, iv, authTag } = await encryptData(nameBytes, key);
+            const folderNameBytes = new TextEncoder().encode(folderName);
+            const { encryptedData, iv, authTag } = await encryptData(folderNameBytes, key);
 
             await axios.post(`${API_BASE_URL}/Folders`, {
                 userId,
                 parentFolderId: currentFolderId,
-                encryptedFolderName: arrayBufferToBase64(payload),
-                initializationVector: arrayBufferToBase64(iv),
-                authenticationTag: arrayBufferToBase64(authTag)
+                encryptedFolderName: btoa(String.fromCharCode(...new Uint8Array(encryptedData))),
+                initializationVector: btoa(String.fromCharCode(...iv)),
+                authenticationTag: btoa(String.fromCharCode(...authTag))
             });
 
-            setShowNewFolderModal(false);
-            setNewFolderName('');
-            fetchContents();
+            fetchContents(currentFolderId);
         } catch (error) {
-            console.error('Failed to create folder', error);
             alert('Failed to create folder.');
         } finally {
             setLoading(false);
         }
     };
 
+    const handleFolderClick = (folderId: string) => {
+        const folderName = decryptedNames[folderId] || 'Unknown Folder';
+        setBreadcrumbs([...breadcrumbs, { id: folderId, name: folderName }]);
+        setCurrentFolderId(folderId);
+    };
+
+    const handleBreadcrumbClick = (folderId: string | null, index: number) => {
+        setBreadcrumbs(breadcrumbs.slice(0, index));
+        setCurrentFolderId(folderId);
+    };
+
     const handleDeleteFolder = async (folderId: string) => {
-        if (!window.confirm("Are you sure you want to delete this folder and ALL its contents?")) return;
+        if (!window.confirm("Are you sure you want to send this folder to the recycle bin?")) return;
         setLoading(true);
         try {
             await axios.delete(`${API_BASE_URL}/Folders/${folderId}`);
             setFolders(folders.filter(f => f.id !== folderId));
+            setSelectedItem(null);
         } catch (error) {
-            console.error('Delete folder failed', error);
             alert('Failed to delete folder.');
+        } finally { setLoading(false); }
+    };
+
+    const handleDownload = async (fileId: string, filename: string) => {
+        setLoading(true);
+        try {
+            const response = await axios.get(`${API_BASE_URL}/Files/${fileId}/download`);
+            const { encryptedData, initializationVector, authenticationTag } = response.data;
+            
+            if (!masterPassword || !username) throw new Error("Missing credentials");
+            const key = await deriveKey(masterPassword, username);
+            
+            const payloadBytes = base64ToArrayBuffer(encryptedData);
+            const ivBytes = base64ToArrayBuffer(initializationVector);
+            const tagBytes = base64ToArrayBuffer(authenticationTag);
+            
+            const decryptedBytes = await decryptData(payloadBytes, ivBytes, tagBytes, key);
+            
+            const blob = new Blob([decryptedBytes], { type: 'application/octet-stream' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+
+        } catch (error) {
+            console.error(error);
+            alert('Failed to download or decrypt file.');
         } finally {
             setLoading(false);
         }
     };
 
-    // ... handleDownload, handleDelete, handlePreview remain the same, just keeping them concise ...
-    const handleDownload = async (fileId: string) => {
-        setLoading(true);
-        try {
-            const response = await axios.get(`${API_BASE_URL}/Files/${fileId}`);
-            const data = response.data;
-            const key = await deriveKey(masterPassword!, username!);
-            const payloadBytes = base64ToArrayBuffer(data.payload);
-            const ivBytes = base64ToArrayBuffer(data.initializationVector);
-            const tagBytes = base64ToArrayBuffer(data.authenticationTag);
-            const decryptedBytes = await decryptData(payloadBytes, ivBytes, tagBytes, key);
-            const fileNameBytes = base64ToArrayBuffer(data.encryptedFileName);
-            const fileName = uint8ArrayToString(fileNameBytes);
-
-            const blob = new Blob([decryptedBytes]);
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = fileName;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
-        } catch (error) {
-            alert('Decryption or download failed.');
-        } finally { setLoading(false); }
-    };
-
-    const handleDelete = async (fileId: string) => {
-        if (!window.confirm("Are you sure you want to permanently delete this file?")) return;
+    const handleDeleteFile = async (fileId: string) => {
+        if (!window.confirm("Are you sure you want to send this file to the recycle bin?")) return;
         setLoading(true);
         try {
             await axios.delete(`${API_BASE_URL}/Files/${fileId}`);
             setFiles(files.filter(f => f.id !== fileId));
+            setSelectedItem(null);
         } catch (error) {
             alert('Failed to delete file.');
         } finally { setLoading(false); }
     };
 
-    const isPreviewable = (filename: string) => {
-        const ext = filename.split('.').pop()?.toLowerCase();
-        return ext === 'png' || ext === 'jpg' || ext === 'jpeg' || ext === 'gif' || ext === 'pdf' || ext === 'txt';
+    const triggerUpload = () => {
+        fileInputRef.current?.click();
     };
 
-    const handlePreview = async (fileId: string) => {
-        setLoading(true);
+    const handleVaultFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        if (!event.target.files || event.target.files.length === 0) return;
+        
+        if (!userId || !masterPassword || !username) {
+            alert('Authentication details missing. Please log in again.');
+            return;
+        }
+
+        setUploading(true);
         try {
-            const response = await axios.get(`${API_BASE_URL}/Files/${fileId}`);
-            const data = response.data;
-            const key = await deriveKey(masterPassword!, username!);
-            const payloadBytes = base64ToArrayBuffer(data.payload);
-            const ivBytes = base64ToArrayBuffer(data.initializationVector);
-            const tagBytes = base64ToArrayBuffer(data.authenticationTag);
-            const decryptedBytes = await decryptData(payloadBytes, ivBytes, tagBytes, key);
-            const fileNameBytes = base64ToArrayBuffer(data.encryptedFileName);
-            const fileName = uint8ArrayToString(fileNameBytes);
-            const ext = fileName.split('.').pop()?.toLowerCase();
-            let mimeType = 'application/octet-stream';
-            let type = 'unknown';
+            const key = await deriveKey(masterPassword, username);
+            const files = Array.from(event.target.files);
 
-            if (ext === 'png' || ext === 'jpg' || ext === 'jpeg' || ext === 'gif') {
-                mimeType = `image/${ext === 'jpg' ? 'jpeg' : ext}`;
-                type = 'image';
-            } else if (ext === 'pdf') {
-                mimeType = 'application/pdf';
-                type = 'pdf';
-            } else if (ext === 'txt') {
-                mimeType = 'text/plain';
-                type = 'text';
+            for (const file of files) {
+                const arrayBuffer = await file.arrayBuffer();
+                const fileBytes = new Uint8Array(arrayBuffer);
+                const { payload: encryptedData, iv, authTag } = await encryptData(fileBytes, key);
+
+                const fileNameBytes = new TextEncoder().encode(file.name);
+                const encryptedFileNameBytes = fileNameBytes;
+
+                let thumbPayload = null, thumbIv = null, thumbTag = null;
+                if (file.type.startsWith('image/') || file.type.startsWith('video/')) {
+                    try {
+                        const thumbBytes = await generateThumbnailBytes(file);
+                        if (thumbBytes) {
+                            const thumbEncryption = await encryptData(thumbBytes, key);
+                            thumbPayload = arrayBufferToBase64(new Uint8Array(thumbEncryption.payload));
+                            thumbIv = arrayBufferToBase64(new Uint8Array(thumbEncryption.iv));
+                            thumbTag = arrayBufferToBase64(new Uint8Array(thumbEncryption.authTag));
+                        }
+                    } catch (e) { console.error("Thumbnail generation failed for", file.name, e); }
+                }
+
+                await axios.post(`${API_BASE_URL}/Files`, {
+                    userId,
+                    folderId: currentFolderId,
+                    fileSize: file.size,
+                    encryptedFileName: arrayBufferToBase64(new Uint8Array(encryptedFileNameBytes)),
+                    payload: arrayBufferToBase64(new Uint8Array(encryptedData)),
+                    initializationVector: arrayBufferToBase64(new Uint8Array(iv)),
+                    authenticationTag: arrayBufferToBase64(new Uint8Array(authTag)),
+                    encryptedThumbnail: thumbPayload,
+                    thumbnailIv: thumbIv,
+                    thumbnailAuthTag: thumbTag
+                });
             }
-
-            const blob = new Blob([decryptedBytes], { type: mimeType });
-            const url = window.URL.createObjectURL(blob);
-            setPreviewData(url);
-            setPreviewType(type);
-            setPreviewName(fileName);
+            fetchContents(currentFolderId);
         } catch (error) {
-            alert('Preview failed.');
-        } finally { setLoading(false); }
+            console.error(error);
+            alert('Failed to upload some files.');
+        } finally {
+            setUploading(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
     };
 
-    const closePreview = () => {
-        if (previewData) window.URL.revokeObjectURL(previewData);
-        setPreviewData(null);
-        setPreviewType(null);
-        setPreviewName(null);
+    
+    const formatBytes = (bytes: number, decimals = 2) => {
+        if (!+bytes) return '0 Bytes';
+        const k = 1024;
+        const dm = decimals < 0 ? 0 : decimals;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
     };
 
-    const toggleDropdown = (e: React.MouseEvent, id: string) => {
-        e.stopPropagation();
-        setActiveDropdown(activeDropdown === id ? null : id);
-    };
-
-    const navigateToFolder = (folderId: string, folderName: string) => {
-        setCurrentFolderId(folderId);
-        setBreadcrumbs([...breadcrumbs, { id: folderId, name: folderName }]);
-        setSearchQuery('');
-    };
-
-    const navigateToBreadcrumb = (index: number) => {
-        const crumb = breadcrumbs[index];
-        setCurrentFolderId(crumb.id);
-        setBreadcrumbs(breadcrumbs.slice(0, index + 1));
-        setSearchQuery('');
+    const formatDate = (dateString: string) => {
+        const date = new Date(dateString);
+        return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
     };
 
     const getFileCategory = (filename: string) => {
@@ -280,253 +316,308 @@ export const MyVault = () => {
     };
 
     const filteredFiles = files.filter(f => {
-        const name = decryptedNames[f.id] || f.id;
-        const matchesSearch = name.toLowerCase().includes(searchQuery.toLowerCase());
-        const category = getFileCategory(name);
-        const matchesCategory = selectedCategory === 'All' || category === selectedCategory;
-        return matchesSearch && matchesCategory;
+        const name = (decryptedNames[f.id] || '').toLowerCase();
+        if (searchQuery && !name.includes(searchQuery.toLowerCase())) return false;
+        
+        if (activeFilter !== 'All') {
+            const cat = getFileCategory(name);
+            if (cat !== activeFilter) return false;
+        }
+        return true;
     });
 
     const filteredFolders = folders.filter(f => {
-        const name = decryptedNames[f.id] || f.id;
-        return name.toLowerCase().includes(searchQuery.toLowerCase());
+        if (activeFilter !== 'All') return false; // Hide folders if filtering by file type
+        const name = (decryptedNames[f.id] || '').toLowerCase();
+        if (searchQuery && !name.includes(searchQuery.toLowerCase())) return false;
+        return true;
     });
 
     return (
-        <div className="glass-panel animate-fade-in" style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
-            {/* Header / Breadcrumbs */}
-            <div className="flex justify-between align-center" style={{ marginBottom: '16px', paddingBottom: '16px', borderBottom: '1px solid var(--surface-border)', flexWrap: 'wrap', gap: '16px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                    {breadcrumbs.map((crumb, index) => (
-                        <span key={crumb.id || 'root'} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span 
-                                onClick={() => navigateToBreadcrumb(index)}
-                                style={{ 
-                                    cursor: 'pointer', 
-                                    color: index === breadcrumbs.length - 1 ? 'var(--primary-color)' : 'var(--text-secondary)',
-                                    fontWeight: index === breadcrumbs.length - 1 ? 600 : 400
-                                }}
+        <div className="vault-container animate-fade-in">
+            {/* Main Content Area */}
+            <div className="vault-main" style={{ paddingRight: selectedItem ? '336px' : '16px' }}>
+                <div className="vault-header-sticky">
+                    <div className="vault-header-top">
+                        <div className="breadcrumbs" style={{ fontSize: '1.5rem', fontWeight: 600, color: 'var(--text-color)' }}>
+                            <span className={`breadcrumb-item ${breadcrumbs.length === 0 ? 'active' : ''}`} onClick={() => handleBreadcrumbClick(null, 0)}>My Vault</span>
+                            {breadcrumbs.map((crumb, index) => (
+                                <span key={crumb.id} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <span style={{ color: 'var(--text-muted)', fontSize: '1.2rem' }}>/</span>
+                                    <span className={`breadcrumb-item ${index === breadcrumbs.length - 1 ? 'active' : ''}`} 
+                                          onClick={() => handleBreadcrumbClick(crumb.id, index + 1)}>
+                                        {crumb.name}
+                                    </span>
+                                </span>
+                            ))}
+                        </div>
+
+                        <div className="vault-header-actions">
+                            <div style={{ position: 'relative' }}>
+                                <button className="btn-add-pill" onClick={() => setAddMenuOpen(!addMenuOpen)}>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 16 16"><path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/></svg>
+                                    Add
+                                </button>
+                                {addMenuOpen && (
+                                    <div className="add-dropdown">
+                                        <button className="add-dropdown-item" onClick={() => { setAddMenuOpen(false); triggerUpload(); }}>
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5"/><path d="M7.646 1.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 2.707V11.5a.5.5 0 0 1-1 0V2.707L5.354 4.854a.5.5 0 1 1-.708-.708z"/></svg>
+                                            Upload Files
+                                        </button>
+                                        <button className="add-dropdown-item" onClick={() => { setAddMenuOpen(false); handleCreateFolder(); }}>
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M8 6.5a.5.5 0 0 1 .5.5v1.5H10a.5.5 0 0 1 0 1H8.5V11a.5.5 0 0 1-1 0V9.5H6a.5.5 0 0 1 0-1h1.5V7a.5.5 0 0 1 .5-.5z"/><path d="M.54 3.87.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.826a2 2 0 0 1-1.991-1.819l-.637-7a1.99 1.99 0 0 1 .342-1.31zM2.19 4a1 1 0 0 0-.996 1.09l.637 7a1 1 0 0 0 .995.91h10.348a1 1 0 0 0 .995-.91l.637-7A1 1 0 0 0 13.81 4H2.19z"/></svg>
+                                            New Folder
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                            
+                            <div className="search-bar-wrapper" style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '24px', padding: '6px 16px' }}>
+                                <svg className="search-icon" style={{ color: 'var(--text-muted)' }} xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001q.044.06.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1 1 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0"/></svg>
+                                <input 
+                                    type="text" 
+                                    className="gallery-search-input" 
+                                    placeholder="Search vault..." 
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    style={{ background: 'transparent', border: 'none', color: '#fff', outline: 'none', marginLeft: '8px' }}
+                                />
+                            </div>
+                            
+                            <div className="view-toggles" style={{ background: 'transparent', border: 'none' }}>
+                                <button className={`view-toggle-btn ${viewMode === 'grid' ? 'active' : ''}`} onClick={() => setViewMode('grid')} style={{ background: viewMode === 'grid' ? 'rgba(255,255,255,0.1)' : 'transparent', borderRadius: '4px' }}>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 16 16"><path d="M1 2.5A1.5 1.5 0 0 1 2.5 1h3A1.5 1.5 0 0 1 7 2.5v3A1.5 1.5 0 0 1 5.5 7h-3A1.5 1.5 0 0 1 1 5.5zm8 0A1.5 1.5 0 0 1 10.5 1h3A1.5 1.5 0 0 1 15 2.5v3A1.5 1.5 0 0 1 13.5 7h-3A1.5 1.5 0 0 1 9 5.5zm-8 8A1.5 1.5 0 0 1 2.5 9h3A1.5 1.5 0 0 1 7 10.5v3A1.5 1.5 0 0 1 5.5 15h-3A1.5 1.5 0 0 1 1 13.5zm8 0A1.5 1.5 0 0 1 10.5 9h3a1.5 1.5 0 0 1 1.5 1.5v3a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 9 13.5z"/></svg>
+                                </button>
+                                <button className={`view-toggle-btn ${viewMode === 'list' ? 'active' : ''}`} onClick={() => setViewMode('list')} style={{ background: viewMode === 'list' ? 'rgba(255,255,255,0.1)' : 'transparent', borderRadius: '4px' }}>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 16 16"><path fillRule="evenodd" d="M2.5 12a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="filter-chips">
+                        {['All', 'Photos', 'Videos', 'Documents'].map(filter => (
+                            <button 
+                                key={filter} 
+                                className={`filter-chip ${activeFilter === filter ? 'active' : ''}`}
+                                onClick={() => setActiveFilter(filter as FilterType)}
                             >
-                                {crumb.name}
-                            </span>
-                            {index < breadcrumbs.length - 1 && <span style={{ color: 'var(--text-secondary)' }}>/</span>}
-                        </span>
-                    ))}
-                    {loading && <span style={{ marginLeft: '12px', color: 'var(--primary-color)', fontSize: '0.85rem', animation: 'pulse 1.5s infinite' }}>Loading...</span>}
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flex: '1', justifyContent: 'flex-end' }}>
-                    <div className="search-container" style={{ maxWidth: '200px' }}>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" className="search-icon" viewBox="0 0 16 16">
-                            <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/>
-                        </svg>
-                        <input 
-                            type="text" 
-                            className="search-input" 
-                            placeholder="Find..." 
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                        />
-                    </div>
-                    
-                    <button onClick={() => setShowNewFolderModal(true)} className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '0.9rem' }}>
-                        + New Folder
-                    </button>
-
-                    <div style={{ display: 'flex', background: 'rgba(0,0,0,0.2)', borderRadius: 'var(--radius-sm)', padding: '4px' }}>
-                        <button onClick={() => setViewMode('list')} style={{ background: viewMode === 'list' ? 'rgba(255,255,255,0.1)' : 'transparent', border: 'none', borderRadius: '4px', padding: '6px 12px', color: viewMode === 'list' ? 'var(--text-primary)' : 'var(--text-secondary)', cursor: 'pointer' }}>
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                                <path fillRule="evenodd" d="M2.5 12a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5zm0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5zm0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5z"/>
-                            </svg>
-                        </button>
-                        <button onClick={() => setViewMode('grid')} style={{ background: viewMode === 'grid' ? 'rgba(255,255,255,0.1)' : 'transparent', border: 'none', borderRadius: '4px', padding: '6px 12px', color: viewMode === 'grid' ? 'var(--text-primary)' : 'var(--text-secondary)', cursor: 'pointer' }}>
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                                <path d="M1 2.5A1.5 1.5 0 0 1 2.5 1h3A1.5 1.5 0 0 1 7 2.5v3A1.5 1.5 0 0 1 5.5 7h-3A1.5 1.5 0 0 1 1 5.5v-3zM2.5 2a.5.5 0 0 0-.5.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 0 .5-.5v-3a.5.5 0 0 0-.5-.5h-3zm6.5.5A1.5 1.5 0 0 1 10.5 1h3A1.5 1.5 0 0 1 15 2.5v3A1.5 1.5 0 0 1 13.5 7h-3A1.5 1.5 0 0 1 9 5.5v-3zm1.5-.5a.5.5 0 0 0-.5.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 0 .5-.5v-3a.5.5 0 0 0-.5-.5h-3zM1 10.5A1.5 1.5 0 0 1 2.5 9h3A1.5 1.5 0 0 1 7 10.5v3A1.5 1.5 0 0 1 5.5 15h-3A1.5 1.5 0 0 1 1 13.5v-3zm1.5-.5a.5.5 0 0 0-.5.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 0 .5-.5v-3a.5.5 0 0 0-.5-.5h-3zm6.5.5A1.5 1.5 0 0 1 10.5 9h3a1.5 1.5 0 0 1 1.5 1.5v3a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 9 13.5v-3zm1.5-.5a.5.5 0 0 0-.5.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 0 .5-.5v-3a.5.5 0 0 0-.5-.5h-3z"/>
-                            </svg>
-                        </button>
+                                {filter}
+                            </button>
+                        ))}
                     </div>
                 </div>
-            </div>
 
-            {/* Categories */}
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '24px', overflowX: 'auto', paddingBottom: '4px' }}>
-                {['All', 'Photos', 'Videos', 'Documents'].map(cat => (
-                    <button 
-                        key={cat} 
-                        onClick={() => setSelectedCategory(cat as any)}
-                        style={{
-                            background: selectedCategory === cat ? 'var(--primary-color)' : 'rgba(255,255,255,0.05)',
-                            color: selectedCategory === cat ? '#fff' : 'var(--text-primary)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            borderRadius: '100px', padding: '6px 16px', cursor: 'pointer', transition: 'all 0.2s',
-                            fontWeight: 500
-                        }}
-                    >
-                        {cat}
-                    </button>
-                ))}
-            </div>
-            
-            {filteredFiles.length === 0 && filteredFolders.length === 0 ? (
-                <div className="text-center" style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', color: 'var(--text-secondary)' }}>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" fill="rgba(255,255,255,0.1)" viewBox="0 0 16 16" style={{ margin: '0 auto 16px auto' }}>
-                        <path d="M4 0h5.293A1 1 0 0 1 10 .293L13.707 4a1 1 0 0 1 .293.707V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2m5.5 1.5v2a1 1 0 0 0 1 1h2z"/>
-                    </svg>
-                    <p style={{ fontSize: '1.2rem', marginBottom: '8px' }}>This folder is empty.</p>
-                </div>
-            ) : (
-                <div style={{ flex: 1, overflowY: 'auto', paddingRight: '8px' }}>
-                    {viewMode === 'list' ? (
-                        <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                            {/* Render Folders First */}
+
+                {loading && <div style={{ textAlign: 'center', color: 'var(--primary)', padding: '24px' }}>Syncing vault...</div>}
+                {uploading && <div style={{ textAlign: 'center', color: 'var(--success-color)', padding: '24px' }}>Encrypting and uploading files securely...</div>}
+
+                {filteredFolders.length > 0 && (
+                    <>
+                        <h3 className="section-heading">Folders <span className="section-badge">{filteredFolders.length}</span></h3>
+                        <div className="folders-grid">
                             {filteredFolders.map(f => (
-                                <li key={f.id} className="file-item" onDoubleClick={() => navigateToFolder(f.id, decryptedNames[f.id] || 'Folder')}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flex: 1, cursor: 'pointer' }} onClick={() => navigateToFolder(f.id, decryptedNames[f.id] || 'Folder')}>
-                                        <div style={{ background: 'rgba(var(--primary-color-rgb),0.15)', padding: '12px', borderRadius: '8px' }}>
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="var(--primary-color)" viewBox="0 0 16 16">
-                                                <path d="M.54 3.87.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.826a2 2 0 0 1-1.991-1.819l-.637-7a1.99 1.99 0 0 1 .342-1.31zM2.19 4a1 1 0 0 0-.996 1.09l.637 7a1 1 0 0 0 .995.91h10.348a1 1 0 0 0 .995-.91l.637-7A1 1 0 0 0 13.81 4H2.19zm4.69-1.707A1 1 0 0 0 6.172 2H2.5a1 1 0 0 0-1 .981l.006.139C1.72 3.042 1.95 3 2.19 3h5.396l-.707-.707z"/>
-                                            </svg>
-                                        </div>
-                                        <span style={{ fontWeight: 600, fontSize: '1.1rem' }}>{decryptedNames[f.id] || f.id}</span>
-                                    </div>
-                                    <div className="dropdown-container">
-                                        <button onClick={(e) => toggleDropdown(e, f.id)} className="btn btn-secondary" style={{ padding: '8px', background: 'transparent', border: 'none', color: 'var(--text-secondary)' }}>
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16"><path d="M9.5 13a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/></svg>
-                                        </button>
-                                        {activeDropdown === f.id && (
-                                            <div className="dropdown-menu">
-                                                <button onClick={() => { handleDeleteFolder(f.id); setActiveDropdown(null); }} disabled={loading} className="dropdown-item danger">
-                                                    Delete Folder
-                                                </button>
-                                            </div>
-                                        )}
-                                    </div>
-                                </li>
-                            ))}
-                            {/* Render Files */}
-                            {filteredFiles.map(f => (
-                                <li key={f.id} className="file-item">
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flex: 1 }}>
-                                        <div style={{ background: 'rgba(255,255,255,0.05)', padding: '12px', borderRadius: '8px' }}>
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="var(--secondary-color)" viewBox="0 0 16 16">
-                                                <path d="M4 0h5.293A1 1 0 0 1 10 .293L13.707 4a1 1 0 0 1 .293.707V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2m5.5 1.5v2a1 1 0 0 0 1 1h2z"/>
-                                            </svg>
-                                        </div>
-                                        <span style={{ fontWeight: 500, fontSize: '1.1rem' }}>{decryptedNames[f.id] || f.id}</span>
-                                    </div>
-                                    <div className="dropdown-container">
-                                        <button onClick={(e) => toggleDropdown(e, f.id)} className="btn btn-secondary" style={{ padding: '8px', background: 'transparent', border: 'none', color: 'var(--text-secondary)' }}>
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16"><path d="M9.5 13a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/></svg>
-                                        </button>
-                                        {activeDropdown === f.id && (
-                                            <div className="dropdown-menu">
-                                                {isPreviewable(decryptedNames[f.id] || '') && (
-                                                    <button onClick={() => { handlePreview(f.id); setActiveDropdown(null); }} disabled={loading} className="dropdown-item">Preview</button>
-                                                )}
-                                                <button onClick={() => { handleDownload(f.id); setActiveDropdown(null); }} disabled={loading} className="dropdown-item">Download</button>
-                                                <button onClick={() => { handleDelete(f.id); setActiveDropdown(null); }} disabled={loading} className="dropdown-item danger">Delete File</button>
-                                            </div>
-                                        )}
-                                    </div>
-                                </li>
-                            ))}
-                        </ul>
-                    ) : (
-                        <div className="file-grid">
-                            {/* Render Folders First */}
-                            {filteredFolders.map(f => (
-                                <div key={f.id} className="file-card" onDoubleClick={() => navigateToFolder(f.id, decryptedNames[f.id] || 'Folder')}>
-                                    <div className="file-card-icon" style={{ position: 'relative', width: '100%', cursor: 'pointer' }} onClick={() => navigateToFolder(f.id, decryptedNames[f.id] || 'Folder')}>
-                                        <div className="dropdown-container" style={{ position: 'absolute', top: '-10px', right: '-10px' }} onClick={e => e.stopPropagation()}>
-                                            <button onClick={(e) => toggleDropdown(e, f.id)} className="btn btn-secondary" style={{ padding: '4px', background: 'transparent', border: 'none', color: 'var(--text-secondary)' }}>
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16"><path d="M9.5 13a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/></svg>
-                                            </button>
-                                            {activeDropdown === f.id && (
-                                                <div className="dropdown-menu" style={{ textAlign: 'left' }}>
-                                                    <button onClick={() => { handleDeleteFolder(f.id); setActiveDropdown(null); }} disabled={loading} className="dropdown-item danger">Delete Folder</button>
-                                                </div>
-                                            )}
-                                        </div>
-                                        <div style={{ background: 'rgba(var(--primary-color-rgb),0.1)', padding: '24px', borderRadius: '50%' }}>
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="var(--primary-color)" viewBox="0 0 16 16">
-                                                <path d="M.54 3.87.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.826a2 2 0 0 1-1.991-1.819l-.637-7a1.99 1.99 0 0 1 .342-1.31zM2.19 4a1 1 0 0 0-.996 1.09l.637 7a1 1 0 0 0 .995.91h10.348a1 1 0 0 0 .995-.91l.637-7A1 1 0 0 0 13.81 4H2.19zm4.69-1.707A1 1 0 0 0 6.172 2H2.5a1 1 0 0 0-1 .981l.006.139C1.72 3.042 1.95 3 2.19 3h5.396l-.707-.707z"/>
-                                            </svg>
-                                        </div>
-                                    </div>
-                                    <div className="file-card-title" style={{ fontWeight: 600 }}>{decryptedNames[f.id] || f.id}</div>
-                                </div>
-                            ))}
-                            {/* Render Files */}
-                            {filteredFiles.map(f => (
-                                <div key={f.id} className="file-card">
-                                    <div className="file-card-icon" style={{ position: 'relative', width: '100%' }}>
-                                        <div className="dropdown-container" style={{ position: 'absolute', top: '-10px', right: '-10px' }}>
-                                            <button onClick={(e) => toggleDropdown(e, f.id)} className="btn btn-secondary" style={{ padding: '4px', background: 'transparent', border: 'none', color: 'var(--text-secondary)' }}>
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16"><path d="M9.5 13a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/></svg>
-                                            </button>
-                                            {activeDropdown === f.id && (
-                                                <div className="dropdown-menu" style={{ textAlign: 'left' }}>
-                                                    {isPreviewable(decryptedNames[f.id] || '') && (
-                                                        <button onClick={() => { handlePreview(f.id); setActiveDropdown(null); }} disabled={loading} className="dropdown-item">Preview</button>
-                                                    )}
-                                                    <button onClick={() => { handleDownload(f.id); setActiveDropdown(null); }} disabled={loading} className="dropdown-item">Download</button>
-                                                    <button onClick={() => { handleDelete(f.id); setActiveDropdown(null); }} disabled={loading} className="dropdown-item danger">Delete File</button>
-                                                </div>
-                                            )}
-                                        </div>
-                                        <div style={{ background: 'rgba(255,255,255,0.05)', padding: '24px', borderRadius: '50%' }}>
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="var(--secondary-color)" viewBox="0 0 16 16">
-                                                <path d="M4 0h5.293A1 1 0 0 1 10 .293L13.707 4a1 1 0 0 1 .293.707V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2m5.5 1.5v2a1 1 0 0 0 1 1h2z"/>
-                                            </svg>
-                                        </div>
-                                    </div>
-                                    <div className="file-card-title">{decryptedNames[f.id] || f.id}</div>
+                                <div 
+                                    key={f.id} 
+                                    className={`folder-card ${selectedItem?.type === 'folder' && selectedItem.id === f.id ? 'selected' : ''}`}
+                                    onClick={() => setSelectedItem({type: 'folder', id: f.id})}
+                                    onDoubleClick={() => handleFolderClick(f.id)}
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="var(--primary)" viewBox="0 0 16 16"><path d="M.54 3.87.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.826a2 2 0 0 1-1.991-1.819l-.637-7a1.99 1.99 0 0 1 .342-1.31zM2.19 4a1 1 0 0 0-.996 1.09l.637 7a1 1 0 0 0 .995.91h10.348a1 1 0 0 0 .995-.91l.637-7A1 1 0 0 0 13.81 4H2.19zm4.69-1.707A1 1 0 0 0 6.172 2H2.5a1 1 0 0 0-1 .981l.006.139C1.72 3.042 1.95 3 2.19 3h5.396l-.707-.707z"/></svg>
+                                    <span style={{ fontWeight: 500, fontSize: '0.9rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                        {decryptedNames[f.id] || 'Encrypted Folder'}
+                                    </span>
                                 </div>
                             ))}
                         </div>
-                    )}
-                </div>
-            )}
-            
-            {/* New Folder Modal */}
-            {showNewFolderModal && (
-                <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.7)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center', backdropFilter: 'blur(4px)' }}>
-                    <div className="glass-panel" style={{ width: '100%', maxWidth: '400px', padding: '32px' }}>
-                        <h3 style={{ marginTop: 0, marginBottom: '24px' }}>Create New Folder</h3>
-                        <form onSubmit={handleCreateFolder}>
-                            <div className="form-group">
-                                <label>Folder Name</label>
-                                <input type="text" className="form-control" value={newFolderName} onChange={e => setNewFolderName(e.target.value)} placeholder="e.g. Personal Taxes" required autoFocus />
-                            </div>
-                            <div style={{ display: 'flex', gap: '16px', marginTop: '24px' }}>
-                                <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowNewFolderModal(false)}>Cancel</button>
-                                <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={loading || !newFolderName.trim()}>
-                                    {loading ? 'Creating...' : 'Create Folder'}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
+                    </>
+                )}
 
-            {/* Preview Modal */}
-            {previewData && (
-                <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', flexDirection: 'column', backdropFilter: 'blur(8px)' }}>
-                    <div style={{ padding: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-                        <h3 style={{ margin: 0, color: 'white' }}>{previewName}</h3>
-                        <button onClick={closePreview} style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', padding: '8px' }}>
-                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16"><path d="M2.146 2.854a.5.5 0 1 1 .708-.708L8 7.293l5.146-5.147a.5.5 0 0 1 .708.708L8.707 8l5.147 5.146a.5.5 0 0 1-.708.708L8 8.707l-5.146 5.147a.5.5 0 0 1-.708-.708L7.293 8 2.146 2.854z"/></svg>
-                        </button>
-                    </div>
-                    <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', overflow: 'hidden' }}>
-                        {previewType === 'image' && <img src={previewData} alt={previewName!} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: '4px' }} />}
-                        {previewType === 'pdf' && <iframe src={previewData} style={{ width: '100%', height: '100%', border: 'none', borderRadius: '4px', background: 'white' }} title="PDF Preview" />}
-                        {previewType === 'text' && <iframe src={previewData} style={{ width: '100%', height: '100%', border: 'none', borderRadius: '4px', background: 'white' }} title="Text Preview" />}
-                    </div>
+                {filteredFiles.length > 0 && (
+                    <>
+                        <h3 className="section-heading">Files <span className="section-badge">{filteredFiles.length}</span></h3>
+                        
+                        {viewMode === 'grid' ? (
+                            <div className="gallery-grid">
+                                {filteredFiles.map(f => {
+                                    const filename = decryptedNames[f.id] || 'Unknown';
+                                    const category = getFileCategory(filename);
+                                    return (
+                                        <div 
+                                            key={f.id} 
+                                            className="gallery-item"
+                                            onClick={() => setSelectedItem({type: 'file', id: f.id})}
+                                            style={{ borderColor: selectedItem?.id === f.id ? 'var(--primary)' : '' }}
+                                        >
+                                            <div className="gallery-item-icon" style={{ overflow: 'hidden', width: '100%', height: '100%' }}>
+                                                {decryptedThumbnails[f.id] ? (
+                                                    <img src={decryptedThumbnails[f.id]} alt="thumbnail" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                ) : category === 'Photos' ? (
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="var(--secondary-color)" viewBox="0 0 16 16"><path d="M4 0h5.293A1 1 0 0 1 10 .293L13.707 4a1 1 0 0 1 .293.707V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2m5.5 1.5v2a1 1 0 0 0 1 1h2z"/><path d="M10.5 5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/><path d="M4.5 10.5a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1-.5-.5v-2z"/><path d="M8.5 10.5a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1-.5-.5v-2z"/></svg>
+                                                ) : category === 'Videos' ? (
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="#a855f7" viewBox="0 0 16 16"><path d="M0 12V4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2zm6.79-6.907A.5.5 0 0 0 6 5.5v5a.5.5 0 0 0 .79.407l3.5-2.5a.5.5 0 0 0 0-.814l-3.5-2.5z"/></svg>
+                                                ) : (
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="var(--text-muted)" viewBox="0 0 16 16"><path d="M4 0h5.293A1 1 0 0 1 10 .293L13.707 4a1 1 0 0 1 .293.707V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2m5.5 1.5v2a1 1 0 0 0 1 1h2z"/></svg>
+                                                )}
+                                            </div>
+                                            <div className="gallery-item-title">{filename}</div>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        ) : (
+                            <table className="list-view-table">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Size</th>
+                                        <th>Date Uploaded</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {filteredFiles.map(f => {
+                                        const filename = decryptedNames[f.id] || 'Unknown';
+                                        return (
+                                            <tr key={f.id} 
+                                                className={`list-view-row ${selectedItem?.id === f.id ? 'selected' : ''}`}
+                                                onClick={() => setSelectedItem({type: 'file', id: f.id})}
+                                            >
+                                                <td className="list-view-cell list-view-cell-name">
+                                                    <div className="list-view-icon">
+                                                        {decryptedThumbnails[f.id] ? (
+                                                            <img src={decryptedThumbnails[f.id]} alt="thumb" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '4px' }} />
+                                                        ) : (
+                                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="var(--text-muted)" viewBox="0 0 16 16"><path d="M4 0h5.293A1 1 0 0 1 10 .293L13.707 4a1 1 0 0 1 .293.707V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2m5.5 1.5v2a1 1 0 0 0 1 1h2z"/></svg>
+                                                        )}
+                                                    </div>
+                                                    {filename}
+                                                </td>
+                                                <td className="list-view-cell" style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                                                    {f.fileSize !== undefined ? formatBytes(f.fileSize) : 'Unknown'}
+                                                </td>
+                                                <td className="list-view-cell" style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                                                    {f.uploadedAt ? formatDate(f.uploadedAt) : 'Unknown'}
+                                                </td>
+                                            </tr>
+                                        )
+                                    })}
+                                </tbody>
+                            </table>
+                        )}
+                    </>
+                )}
+            </div>
+
+            {/* Side Panel for Details */}
+            <div className={`side-panel ${selectedItem ? 'open' : ''}`}>
+                <div className="side-panel-header">
+                    <span style={{ fontWeight: 600 }}>Details</span>
+                    <button className="side-panel-close" onClick={() => setSelectedItem(null)}>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16"><path d="M2.146 2.854a.5.5 0 1 1 .708-.708L8 7.293l5.146-5.147a.5.5 0 0 1 .708.708L8.707 8l5.147 5.146a.5.5 0 0 1-.708.708L8 8.707l-5.146 5.147a.5.5 0 0 1-.708-.708L7.293 8 2.146 2.854Z"/></svg>
+                    </button>
                 </div>
-            )}
+                
+                {selectedItem && (
+                    <div className="side-panel-content">
+                        {selectedItem.type === 'file' && (
+                            <>
+                                <div className="panel-preview">
+                                    {decryptedThumbnails[selectedItem.id] ? (
+                                        <img src={decryptedThumbnails[selectedItem.id]} alt="preview" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                                    ) : (
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" fill="var(--text-muted)" viewBox="0 0 16 16"><path d="M4 0h5.293A1 1 0 0 1 10 .293L13.707 4a1 1 0 0 1 .293.707V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2m5.5 1.5v2a1 1 0 0 0 1 1h2z"/></svg>
+                                    )}
+                                </div>
+                                <div className="panel-metadata-block">
+                                    <div className="metadata-item">
+                                        <span className="metadata-label">Name</span>
+                                        <span className="metadata-value">{decryptedNames[selectedItem.id] || 'Unknown'}</span>
+                                    </div>
+                                    <div className="metadata-item">
+                                        <span className="metadata-label">Type</span>
+                                        <span className="metadata-value">{getFileCategory(decryptedNames[selectedItem.id] || '')}</span>
+                                    </div>
+                                    <div className="metadata-item">
+                                        <span className="metadata-label">Size</span>
+                                        <span className="metadata-value">{
+                                            files.find(f => f.id === selectedItem.id)?.fileSize !== undefined 
+                                            ? formatBytes(files.find(f => f.id === selectedItem.id)!.fileSize!) 
+                                            : 'Unknown'
+                                        }</span>
+                                    </div>
+                                    <div className="metadata-item">
+                                        <span className="metadata-label">Date Uploaded</span>
+                                        <span className="metadata-value">{
+                                            files.find(f => f.id === selectedItem.id)?.uploadedAt 
+                                            ? formatDate(files.find(f => f.id === selectedItem.id)!.uploadedAt!) 
+                                            : 'Unknown'
+                                        }</span>
+                                    </div>
+                                    <div className="metadata-item">
+                                        <span className="metadata-label">Security</span>
+                                        <span className="metadata-value" style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--success-color)' }}>
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/></svg>
+                                            AES-256-GCM Encrypted
+                                        </span>
+                                    </div>
+                                </div>
+                                <div className="panel-actions" style={{ flexDirection: 'row', gap: '8px', padding: '16px 0', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                                    <button 
+                                        className="btn-minimal" 
+                                        onClick={() => handleDownload(selectedItem.id, decryptedNames[selectedItem.id] || 'Unknown')}
+                                        title="Download"
+                                        style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708z"/></svg>
+                                        <span style={{ fontSize: '0.85rem' }}>Download</span>
+                                    </button>
+                                    <button 
+                                        className="btn-minimal btn-minimal-danger" 
+                                        onClick={() => handleDeleteFile(selectedItem.id)}
+                                        title="Delete"
+                                        style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5M11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1zm1.958 1-.846 10.58a1 1 0 0 1-.997.92h-6.23a1 1 0 0 1-.997-.92L3.042 3.5zm-7.487 1a.5.5 0 0 1 .528.47l.5 8.5a.5.5 0 0 1-.998.06L5 5.03a.5.5 0 0 1 .47-.53Zm5.058 0a.5.5 0 0 1 .47.53l-.5 8.5a.5.5 0 1 1-.998-.06l.5-8.5a.5.5 0 0 1 .528-.47M8 4.5a.5.5 0 0 1 .5.5v8.5a.5.5 0 0 1-1 0V5a.5.5 0 0 1 .5-.5"/></svg>
+                                        <span style={{ fontSize: '0.85rem' }}>Delete</span>
+                                    </button>
+                                </div>
+                            </>
+                        )}
+                        {selectedItem.type === 'folder' && (
+                            <>
+                                <div className="panel-preview" style={{ border: 'none', background: 'transparent' }}>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" fill="var(--primary)" viewBox="0 0 16 16"><path d="M.54 3.87.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.826a2 2 0 0 1-1.991-1.819l-.637-7a1.99 1.99 0 0 1 .342-1.31zM2.19 4a1 1 0 0 0-.996 1.09l.637 7a1 1 0 0 0 .995.91h10.348a1 1 0 0 0 .995-.91l.637-7A1 1 0 0 0 13.81 4H2.19zm4.69-1.707A1 1 0 0 0 6.172 2H2.5a1 1 0 0 0-1 .981l.006.139C1.72 3.042 1.95 3 2.19 3h5.396l-.707-.707z"/></svg>
+                                </div>
+                                <div className="panel-metadata-block">
+                                    <div className="metadata-item">
+                                        <span className="metadata-label">Name</span>
+                                        <span className="metadata-value">{decryptedNames[selectedItem.id] || 'Unknown'}</span>
+                                    </div>
+                                </div>
+                                <div className="panel-actions">
+                                    <button className="panel-btn panel-btn-primary" onClick={() => handleFolderClick(selectedItem.id)}>
+                                        Open Folder
+                                    </button>
+                                    <button className="panel-btn panel-btn-danger" onClick={() => handleDeleteFolder(selectedItem.id)}>
+                                        Move to Bin
+                                    </button>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                )}
+            </div>
+
+            {/* Hidden Input & FAB */}
+            <input 
+                type="file" 
+                multiple 
+                ref={fileInputRef}
+                style={{ display: 'none' }} 
+                onChange={handleVaultFileUpload} 
+            />
+            
+
         </div>
     );
 };
-
-export default MyVault;

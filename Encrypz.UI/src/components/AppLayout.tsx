@@ -12,13 +12,13 @@ export const AppLayout = () => {
         <div className="app-layout animate-fade-in">
             <aside className="sidebar">
                 <div style={{ marginBottom: '40px', padding: '0 16px' }}>
-                    <h2 style={{ margin: 0, fontSize: '1.8rem' }}>
-                        <span style={{ color: 'var(--primary-color)' }}>Encrypz</span>
+                    <h2 style={{ margin: 0, fontSize: '1.8rem', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <img src="/logo.png" alt="Encrypz Logo" style={{ height: '32px', width: 'auto', borderRadius: '4px' }} />
+                        <span style={{ color: 'var(--primary)' }}>Encrypz</span>
                     </h2>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: '4px' }}>Zero-Knowledge Vault</p>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '4px', paddingLeft: '44px' }}>Zero-Knowledge Vault</p>
                 </div>
-                
-                <nav style={{ flex: 1 }}>
+                <nav style={{ flex: 1, marginTop: '20px' }}>
                     <NavLink 
                         to="/vault" 
                         className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}
@@ -30,16 +30,17 @@ export const AppLayout = () => {
                     </NavLink>
                     
                     <NavLink 
-                        to="/upload" 
+                        to="/recycle-bin" 
                         className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 16 16">
-                            <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5"/>
-                            <path d="M7.646 1.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 2.707V11.5a.5.5 0 0 1-1 0V2.707L5.354 4.854a.5.5 0 1 1-.708-.708z"/>
+                            <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
+                            <path fillRule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
                         </svg>
-                        Upload Files
+                        Recycle Bin
                     </NavLink>
                     
+
                     <NavLink 
                         to="/profile" 
                         className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}
@@ -52,7 +53,7 @@ export const AppLayout = () => {
                     </NavLink>
                 </nav>
 
-                <div style={{ borderTop: '1px solid var(--surface-border)', paddingTop: '24px' }}>
+                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '24px' }}>
                     <div style={{ marginBottom: '16px', padding: '0 16px', fontSize: '0.85rem', color: 'var(--success-color)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: 'var(--success-color)', boxShadow: '0 0 8px var(--success-color)' }}></span>
                         Drive Connected
