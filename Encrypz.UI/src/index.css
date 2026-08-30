@@ -240,6 +240,15 @@ label {
   overflow-y: auto;
 }
 
+@media (max-width: 768px) {
+  .sidebar {
+    display: none; /* Hide desktop sidebar on mobile */
+  }
+  .main-content {
+    padding: 0; /* Remove desktop padding on mobile to allow full width */
+  }
+}
+
 .nav-link {
   display: flex;
   align-items: center;
