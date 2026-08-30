@@ -58,6 +58,10 @@ export const MyVault = () => {
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
+        document.title = "Encrypz - My Vault";
+    }, []);
+
+    useEffect(() => {
         const onUpload = () => triggerUpload();
         const onNewFolder = () => handleCreateFolder();
         
@@ -338,6 +342,17 @@ export const MyVault = () => {
             {/* Main Content Area */}
             <div className={`vault-main ${selectedItem ? 'panel-open' : ''}`}>
                 <div className="vault-header-sticky">
+                    {/* Mobile App Bar */}
+                    <div className="mobile-app-bar hide-on-desktop">
+                        <button className="mobile-icon-btn" style={{ background: 'transparent', border: 'none', color: '#4da6ff', cursor: 'pointer', padding: '8px' }}>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" fill="currentColor" viewBox="0 0 16 16"><path fillRule="evenodd" d="M2.5 12a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5"/></svg>
+                        </button>
+                        <h2 className="mobile-app-title" style={{ margin: 0, fontSize: '1.2rem', fontWeight: 500 }}>My Encrypz</h2>
+                        <button className="mobile-icon-btn" style={{ background: 'transparent', border: 'none', color: '#4da6ff', cursor: 'pointer', padding: '8px' }}>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16"><path d="M9.5 13a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/></svg>
+                        </button>
+                    </div>
+
                     <div className="vault-header-top">
                         <div className="breadcrumbs" style={{ fontSize: '1.5rem', fontWeight: 600, color: 'var(--text-color)' }}>
                             <span className={`breadcrumb-item ${breadcrumbs.length === 0 ? 'active' : ''}`} onClick={() => handleBreadcrumbClick(null, 0)}>My Vault</span>
@@ -419,14 +434,21 @@ export const MyVault = () => {
                             {filteredFolders.map(f => (
                                 <div 
                                     key={f.id} 
-                                    className={`folder-card ${selectedItem?.type === 'folder' && selectedItem.id === f.id ? 'selected' : ''}`}
+                                    className={`folder-card mobile-vertical-card ${selectedItem?.type === 'folder' && selectedItem.id === f.id ? 'selected' : ''}`}
                                     onClick={() => setSelectedItem({type: 'folder', id: f.id})}
                                     onDoubleClick={() => handleFolderClick(f.id)}
                                 >
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="var(--primary)" viewBox="0 0 16 16"><path d="M.54 3.87.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.826a2 2 0 0 1-1.991-1.819l-.637-7a1.99 1.99 0 0 1 .342-1.31zM2.19 4a1 1 0 0 0-.996 1.09l.637 7a1 1 0 0 0 .995.91h10.348a1 1 0 0 0 .995-.91l.637-7A1 1 0 0 0 13.81 4H2.19zm4.69-1.707A1 1 0 0 0 6.172 2H2.5a1 1 0 0 0-1 .981l.006.139C1.72 3.042 1.95 3 2.19 3h5.396l-.707-.707z"/></svg>
-                                    <span style={{ fontWeight: 500, fontSize: '0.9rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                        {decryptedNames[f.id] || 'Encrypted Folder'}
-                                    </span>
+                                    <div className="folder-icon-wrapper">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="#4da6ff" viewBox="0 0 16 16"><path d="M.54 3.87.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.826a2 2 0 0 1-1.991-1.819l-.637-7a1.99 1.99 0 0 1 .342-1.31zM2.19 4a1 1 0 0 0-.996 1.09l.637 7a1 1 0 0 0 .995.91h10.348a1 1 0 0 0 .995-.91l.637-7A1 1 0 0 0 13.81 4H2.19z"/></svg>
+                                    </div>
+                                    <div className="mobile-card-info">
+                                        <span className="mobile-card-title">
+                                            {decryptedNames[f.id] || 'Encrypted Folder'}
+                                        </span>
+                                        <button className="mobile-more-btn hide-on-desktop" onClick={(e) => { e.stopPropagation(); setSelectedItem({type: 'folder', id: f.id}) }}>
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M9.5 13a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/></svg>
+                                        </button>
+                                    </div>
                                 </div>
                             ))}
                         </div>
@@ -445,9 +467,8 @@ export const MyVault = () => {
                                     return (
                                         <div 
                                             key={f.id} 
-                                            className="gallery-item"
+                                            className={`gallery-item mobile-vertical-card ${selectedItem?.id === f.id ? 'selected' : ''}`}
                                             onClick={() => setSelectedItem({type: 'file', id: f.id})}
-                                            style={{ borderColor: selectedItem?.id === f.id ? 'var(--primary)' : '' }}
                                         >
                                             <div className="gallery-item-icon" style={{ overflow: 'hidden', width: '100%', height: '100%' }}>
                                                 {decryptedThumbnails[f.id] ? (
@@ -460,7 +481,13 @@ export const MyVault = () => {
                                                     <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="var(--text-muted)" viewBox="0 0 16 16"><path d="M4 0h5.293A1 1 0 0 1 10 .293L13.707 4a1 1 0 0 1 .293.707V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2m5.5 1.5v2a1 1 0 0 0 1 1h2z"/></svg>
                                                 )}
                                             </div>
-                                            <div className="gallery-item-title">{filename}</div>
+                                            <div className="gallery-item-title hide-on-mobile">{filename}</div>
+                                            <div className="mobile-card-info hide-on-desktop">
+                                                <span className="mobile-card-title">{filename}</span>
+                                                <button className="mobile-more-btn" onClick={(e) => { e.stopPropagation(); setSelectedItem({type: 'file', id: f.id}) }}>
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M9.5 13a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0-5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/></svg>
+                                                </button>
+                                            </div>
                                         </div>
                                     )
                                 })}
@@ -608,7 +635,7 @@ export const MyVault = () => {
                 )}
             </div>
 
-            {/* Hidden Input & FAB */}
+            {/* Hidden Input */}
             <input 
                 type="file" 
                 multiple 
@@ -617,7 +644,28 @@ export const MyVault = () => {
                 onChange={handleVaultFileUpload} 
             />
             
-
+            {/* Mobile FAB */}
+            <div className="fab-container hide-on-desktop">
+                {addMenuOpen && (
+                    <div className="fab-menu">
+                        <button className="fab-item" onClick={() => { setAddMenuOpen(false); triggerUpload(); }} style={{ background: 'transparent', border: 'none' }}>
+                            <span className="fab-label">Upload File</span>
+                            <div className="fab-mini">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5"/><path d="M7.646 1.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 2.707V11.5a.5.5 0 0 1-1 0V2.707L5.354 4.854a.5.5 0 1 1-.708-.708z"/></svg>
+                            </div>
+                        </button>
+                        <button className="fab-item" onClick={() => { setAddMenuOpen(false); handleCreateFolder(); }} style={{ background: 'transparent', border: 'none' }}>
+                            <span className="fab-label">New Folder</span>
+                            <div className="fab-mini">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16"><path d="M8 6.5a.5.5 0 0 1 .5.5v1.5H10a.5.5 0 0 1 0 1H8.5V11a.5.5 0 0 1-1 0V9.5H6a.5.5 0 0 1 0-1h1.5V7a.5.5 0 0 1 .5-.5z"/><path d="M.54 3.87.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.826a2 2 0 0 1-1.991-1.819l-.637-7a1.99 1.99 0 0 1 .342-1.31zM2.19 4a1 1 0 0 0-.996 1.09l.637 7a1 1 0 0 0 .995.91h10.348a1 1 0 0 0 .995-.91l.637-7A1 1 0 0 0 13.81 4H2.19z"/></svg>
+                            </div>
+                        </button>
+                    </div>
+                )}
+                <button className="fab-main" onClick={() => setAddMenuOpen(!addMenuOpen)} style={{ background: '#4da6ff' }}>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 16 16"><path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/></svg>
+                </button>
+            </div>
         </div>
     );
 };

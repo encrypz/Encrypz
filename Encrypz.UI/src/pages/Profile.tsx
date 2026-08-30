@@ -18,6 +18,10 @@ export const Profile = () => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        document.title = "Encrypz - User Profile";
+    }, []);
+
+    useEffect(() => {
         if (userId) {
             fetchProfile();
         } else {

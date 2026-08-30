@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { generateThumbnailBytes } from '../utils/media';
@@ -27,6 +27,10 @@ export const Upload = () => {
     const [uploading, setUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState<{current: number, total: number} | null>(null);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+    useEffect(() => {
+        document.title = "Encrypz - Upload Files";
+    }, []);
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files || e.target.files.length === 0) return;

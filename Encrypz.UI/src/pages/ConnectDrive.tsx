@@ -10,6 +10,10 @@ export const ConnectDrive = () => {
     const userId = sessionStorage.getItem('userId');
 
     useEffect(() => {
+        document.title = "Encrypz - Connect Google Drive";
+    }, []);
+
+    useEffect(() => {
         if (!userId) {
             navigate('/login');
             return;

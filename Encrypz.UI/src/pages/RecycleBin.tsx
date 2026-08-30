@@ -37,6 +37,9 @@ export const RecycleBin = () => {
     const [decryptedThumbnails, setDecryptedThumbnails] = useState<Record<string, string>>({});
     const [loading, setLoading] = useState(false);
     
+    useEffect(() => {
+        document.title = "Encrypz - Recycle Bin";
+    }, []);
 
     useEffect(() => {
         if (userId && masterPassword && username) {
