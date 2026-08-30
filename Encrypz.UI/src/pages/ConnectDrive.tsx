@@ -46,14 +46,13 @@ export const ConnectDrive = () => {
     return (
         <div className="container animate-fade-in text-center" style={{ marginTop: '10vh' }}>
             <div className="glass-panel" style={{ maxWidth: '500px', margin: '0 auto', padding: '40px' }}>
-                <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" fill="var(--primary-color)" viewBox="0 0 16 16" style={{ filter: 'drop-shadow(0 0 8px rgba(0,240,255,0.4))', marginBottom: '20px' }}>
-                    <path d="M15.224 4.582a.5.5 0 0 0-.448-.282H8.736L7.202 1.63A.5.5 0 0 0 6.776 1.4H.776a.5.5 0 0 0-.448.282l-3.5 7A.5.5 0 0 0-3 9.4h6.488l1.534 2.67a.5.5 0 0 0 .426.23h6.776a.5.5 0 0 0 .448-.282l3.5-7a.5.5 0 0 0 0-.436z"/>
-                </svg>
+                <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" fill="var(--primary-color)" style={{ filter: 'drop-shadow(0 0 8px rgba(0,240,255,0.4))', marginBottom: '20px' }} viewBox="0 0 16 16"><path d="M15.545 6.558a9.42 9.42 0 0 1 .139 1.626c0 2.434-.87 4.492-2.384 5.885h.002C11.978 15.292 10.158 16 8 16A8 8 0 1 1 8 0a7.689 7.689 0 0 1 5.352 2.082l-2.284 2.284A4.347 4.347 0 0 0 8 3.166c-2.087 0-3.86 1.408-4.492 3.304a4.792 4.792 0 0 0 0 3.063h.003c.635 1.893 2.405 3.301 4.492 3.301 1.078 0 2.004-.276 2.722-.764h-.003a3.702 3.702 0 0 0 1.599-2.431H8v-3.08h7.545z"/></svg>
                 <h2 style={{ marginBottom: '10px' }}>Connect Cloud Storage</h2>
                 <p style={{ color: 'var(--text-secondary)', marginBottom: '30px' }}>
                     Encrypz encrypts your files locally, but requires a cloud provider to securely store the encrypted blobs. Connect your Google Drive to continue.
                 </p>
-                <button onClick={handleConnectDrive} className="btn btn-primary" style={{ width: '100%', padding: '16px', fontSize: '1.1rem' }}>
+                <button onClick={handleConnectDrive} className="btn btn-primary" style={{ width: '100%', padding: '16px', fontSize: '1.1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16"><path d="M15.545 6.558a9.42 9.42 0 0 1 .139 1.626c0 2.434-.87 4.492-2.384 5.885h.002C11.978 15.292 10.158 16 8 16A8 8 0 1 1 8 0a7.689 7.689 0 0 1 5.352 2.082l-2.284 2.284A4.347 4.347 0 0 0 8 3.166c-2.087 0-3.86 1.408-4.492 3.304a4.792 4.792 0 0 0 0 3.063h.003c.635 1.893 2.405 3.301 4.492 3.301 1.078 0 2.004-.276 2.722-.764h-.003a3.702 3.702 0 0 0 1.599-2.431H8v-3.08h7.545z"/></svg>
                     Connect Google Drive
                 </button>
                 <button onClick={handleLogout} className="btn btn-secondary" style={{ width: '100%', marginTop: '15px' }}>

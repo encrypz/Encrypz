@@ -93,7 +93,7 @@ export const Profile = () => {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill={profile.isGoogleDriveConnected ? 'var(--success-color)' : 'var(--text-secondary)'} viewBox="0 0 16 16">
-                                <path d="M15.96 7.358 10.154.21A.5.5 0 0 0 9.77 0H6.23a.5.5 0 0 0-.384.21L.04 7.358a.5.5 0 0 0 .385.808h5.805l.385.21 2.915 5.247a.5.5 0 0 0 .874 0l2.915-5.247.385-.21h5.805a.5.5 0 0 0 .385-.808ZM8 1.448l4.475 5.5H3.525L8 1.448Zm-2.348 6.5L3.385 11.536 1.838 8.749h3.814ZM8 12.395l-1.92-3.447h3.84L8 12.395Zm2.348-4.447h3.814l-1.547 2.787-2.267-2.787Z"/>
+                                <path d="M15.545 6.558a9.42 9.42 0 0 1 .139 1.626c0 2.434-.87 4.492-2.384 5.885h.002C11.978 15.292 10.158 16 8 16A8 8 0 1 1 8 0a7.689 7.689 0 0 1 5.352 2.082l-2.284 2.284A4.347 4.347 0 0 0 8 3.166c-2.087 0-3.86 1.408-4.492 3.304a4.792 4.792 0 0 0 0 3.063h.003c.635 1.893 2.405 3.301 4.492 3.301 1.078 0 2.004-.276 2.722-.764h-.003a3.702 3.702 0 0 0 1.599-2.431H8v-3.08h7.545z"/>
                             </svg>
                             <span style={{ color: 'var(--text-secondary)' }}>Google Drive Integration</span>
                         </div>
