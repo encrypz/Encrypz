@@ -11,12 +11,23 @@ export const Login = () => {
     const [confirmPassword, setConfirmPassword] = useState('');
     const navigate = useNavigate();
 
+    const isStrongPassword = (password: string) => {
+        const regex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#^()_+\-=\[\]{};':"\\|,.<>\/?])[A-Za-z\d@$!%*?&#^()_+\-=\[\]{};':"\\|,.<>\/?]{8,}$/;
+        return regex.test(password);
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         
-        if (isRegister && masterPassword !== confirmPassword) {
-            alert('Passwords do not match.');
-            return;
+        if (isRegister) {
+            if (masterPassword !== confirmPassword) {
+                alert('Passwords do not match.');
+                return;
+            }
+            if (!isStrongPassword(masterPassword)) {
+                alert('Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character.');
+                return;
+            }
         }
 
         try {

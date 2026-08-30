@@ -1,36 +1,15 @@
-# Place this file at the root of the Encrypz repo (next to Encrypz.slnx)
-# Run:  docker compose up -d --build
-
 services:
-  mysql:
-    image: mysql:8.0
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: encrypz
-      MYSQL_USER: encrypz
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-    volumes:
-      - mysql_data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
   api:
     build:
       context: .
       dockerfile: Encrypz.API.Dockerfile
     restart: unless-stopped
-    depends_on:
-      mysql:
-        condition: service_healthy
     environment:
-      ConnectionStrings__DefaultConnection: "Server=mysql;Port=3306;Database=encrypz;User=encrypz;Password=${MYSQL_PASSWORD};"
+      ConnectionStrings__DefaultConnection: ${DB_CONNECTION_STRING}
       Frontend__AllowedOrigins: ${FRONTEND_URL}
       GoogleDrive__ClientId: ${GOOGLE_CLIENT_ID}
       GoogleDrive__ClientSecret: ${GOOGLE_CLIENT_SECRET}
+      GoogleDrive__RedirectUri: ${GOOGLE_REDIRECT_URI}
       ASPNETCORE_ENVIRONMENT: Production
     ports:
       - "5207:8080"
@@ -46,6 +25,3 @@ services:
       - api
     ports:
       - "5173:80"
-
-volumes:
-  mysql_data:

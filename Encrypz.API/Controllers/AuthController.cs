@@ -14,11 +14,13 @@ namespace Encrypz.API.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly IGoogleDriveService _googleDriveService;
+        private readonly IConfiguration _configuration;
 
-        public AuthController(ApplicationDbContext context, IGoogleDriveService googleDriveService)
+        public AuthController(ApplicationDbContext context, IGoogleDriveService googleDriveService, IConfiguration configuration)
         {
             _context = context;
             _googleDriveService = googleDriveService;
+            _configuration = configuration;
         }
 
         public class LoginRequest
@@ -73,7 +75,7 @@ namespace Encrypz.API.Controllers
         [HttpGet("google-login")]
         public IActionResult GoogleLogin()
         {
-            var redirectUri = "http://localhost:5207/api/Auth/google-callback";
+            var redirectUri = _configuration["GoogleDrive:RedirectUri"] ?? "http://localhost:5207/api/Auth/google-callback";
             var url = _googleDriveService.GetAuthorizationUrl(redirectUri);
             return Ok(new { Url = url });
         }
@@ -87,7 +89,7 @@ namespace Encrypz.API.Controllers
                 return BadRequest("Invalid callback parameters.");
             }
 
-            var redirectUri = "http://localhost:5207/api/Auth/google-callback";
+            var redirectUri = _configuration["GoogleDrive:RedirectUri"] ?? "http://localhost:5207/api/Auth/google-callback";
             var refreshToken = await _googleDriveService.ExchangeCodeForRefreshTokenAsync(code, redirectUri);
 
             var user = await _context.Users.FindAsync(userId);
@@ -98,7 +100,8 @@ namespace Encrypz.API.Controllers
             }
 
             // Redirect back to frontend with success flag
-            return Redirect("http://localhost:5173/connect?connected=true");
+            var frontendUrl = _configuration["Frontend:AllowedOrigins"]?.Split(',')[0] ?? "http://localhost:5173";
+            return Redirect($"{frontendUrl}/connect?connected=true");
         }
 
         [HttpGet("user/{userId}")]
