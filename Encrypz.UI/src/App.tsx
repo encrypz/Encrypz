@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Login } from './pages/Login';
+import { Register } from './pages/Register';
 import { ConnectDrive } from './pages/ConnectDrive';
 import { AppLayout } from './components/AppLayout';
 import { MyVault } from './pages/MyVault';
@@ -30,6 +31,7 @@ function App() {
       <Routes>
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
         <Route path="/connect" element={<ConnectDrive />} />
         
         {/* Protected Routes inside AppLayout */}
