@@ -16,6 +16,10 @@
   overflow-y: auto;
   overflow-x: hidden;
   transition: all 0.3s ease;
+  padding-right: 16px;
+}
+.vault-main.panel-open {
+  padding-right: 336px;
 }
 
 /* Header & Controls */
@@ -684,4 +688,68 @@
 .btn-minimal-danger:hover {
     background: rgba(255, 77, 79, 0.1);
     border-color: rgba(255, 77, 79, 0.3);
+}
+
+/* Mobile Responsiveness */
+@media (max-width: 768px) {
+  .vault-main.panel-open {
+    padding-right: 16px; /* Don't shrink main content when side panel is open on mobile */
+  }
+
+  .vault-header-sticky {
+    padding: 16px 20px 12px 20px;
+    margin: -16px -16px 16px -16px;
+  }
+
+  .vault-header-top {
+    flex-direction: column;
+    align-items: stretch;
+    margin-bottom: 16px;
+    gap: 12px;
+  }
+
+  .breadcrumbs {
+    font-size: 1.2rem !important;
+  }
+
+  .vault-header-actions {
+    flex-wrap: wrap;
+    justify-content: space-between;
+    width: 100%;
+    gap: 12px;
+  }
+
+  .search-bar-wrapper {
+    order: 3;
+    width: 100%;
+    margin-top: 4px;
+    flex: none;
+    box-sizing: border-box;
+  }
+
+  .btn-add-pill {
+    padding: 8px 16px;
+    font-size: 0.9rem;
+  }
+
+  .folders-grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 12px;
+  }
+
+  .gallery-grid {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 12px;
+  }
+
+  .side-panel {
+    width: 100%;
+    right: -100%;
+    box-shadow: none;
+  }
+
+  .fab-container {
+    bottom: 24px;
+    right: 24px;
+  }
 }

@@ -336,7 +336,7 @@ export const MyVault = () => {
     return (
         <div className="vault-container animate-fade-in">
             {/* Main Content Area */}
-            <div className="vault-main" style={{ paddingRight: selectedItem ? '336px' : '16px' }}>
+            <div className={`vault-main ${selectedItem ? 'panel-open' : ''}`}>
                 <div className="vault-header-sticky">
                     <div className="vault-header-top">
                         <div className="breadcrumbs" style={{ fontSize: '1.5rem', fontWeight: 600, color: 'var(--text-color)' }}>
