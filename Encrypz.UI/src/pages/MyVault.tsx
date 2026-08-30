@@ -367,7 +367,21 @@ export const MyVault = () => {
                             ))}
                         </div>
 
-                        <div className="vault-header-actions">
+                        <div className="mobile-view-toggle hide-on-desktop">
+                            <button 
+                                className="view-toggle-btn active" 
+                                onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
+                                style={{ background: 'transparent', padding: '4px' }}
+                            >
+                                {viewMode === 'grid' ? (
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16"><path fillRule="evenodd" d="M2.5 12a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5"/></svg>
+                                ) : (
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16"><path d="M1 2.5A1.5 1.5 0 0 1 2.5 1h3A1.5 1.5 0 0 1 7 2.5v3A1.5 1.5 0 0 1 5.5 7h-3A1.5 1.5 0 0 1 1 5.5zm8 0A1.5 1.5 0 0 1 10.5 1h3A1.5 1.5 0 0 1 15 2.5v3A1.5 1.5 0 0 1 13.5 7h-3A1.5 1.5 0 0 1 9 5.5zm-8 8A1.5 1.5 0 0 1 2.5 9h3A1.5 1.5 0 0 1 7 10.5v3A1.5 1.5 0 0 1 5.5 15h-3A1.5 1.5 0 0 1 1 13.5zm8 0A1.5 1.5 0 0 1 10.5 9h3a1.5 1.5 0 0 1 1.5 1.5v3a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 9 13.5z"/></svg>
+                                )}
+                            </button>
+                        </div>
+
+                        <div className="vault-header-actions hide-on-mobile">
                             <div style={{ position: 'relative' }}>
                                 <button className="btn-add-pill" onClick={() => setAddMenuOpen(!addMenuOpen)}>
                                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 16 16"><path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/></svg>
@@ -410,7 +424,7 @@ export const MyVault = () => {
                         </div>
                     </div>
 
-                    <div className="filter-chips">
+                    <div className="filter-chips hide-on-mobile">
                         {['All', 'Photos', 'Videos', 'Documents'].map(filter => (
                             <button 
                                 key={filter} 
