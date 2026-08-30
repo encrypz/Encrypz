@@ -24,6 +24,7 @@ namespace Encrypz.API.Controllers
         }
 
         [HttpPost]
+        [DisableRequestSizeLimit]
         public async Task<IActionResult> Upload([FromBody] FileUploadDto dto)
         {
             var user = await _context.Users.FindAsync(dto.UserId);
