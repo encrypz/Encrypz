@@ -62,7 +62,7 @@ export const Login = () => {
                 <div className="text-center mb-4">
                     <img src="/logo.png" alt="Encrypz Logo" style={{ height: '72px', width: 'auto', borderRadius: '8px', marginBottom: '4px' }} />
                     <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--primary)', letterSpacing: '1px', marginBottom: '12px' }}>ENCRYPZ</div>
-                    <p style={{ color: 'var(--text-muted)', marginTop: '4px', fontSize: '1.1rem', marginBotton: '16px' }}>
+                    <p style={{ color: 'var(--text-muted)', marginTop: '4px', fontSize: '1.1rem', marginBottom: '16px' }}>
                         Access your Vault
                     </p>
                 </div>
