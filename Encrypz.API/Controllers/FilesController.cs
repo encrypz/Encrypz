@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Authorization;
+using System.Security.Claims;
 using Encrypz.Core.DTOs;
 using Encrypz.Core.Entities;
 using Encrypz.Infrastructure.Data;
@@ -10,10 +12,12 @@ using System.Threading.Tasks;
 
 namespace Encrypz.API.Controllers
 {
+    [Authorize]
     [ApiController]
     [Route("api/[controller]")]
     public class FilesController : ControllerBase
     {
+        private Guid CurrentUserId => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
         private readonly ApplicationDbContext _context;
         private readonly IGoogleDriveService _googleDriveService;
 
@@ -27,6 +31,10 @@ namespace Encrypz.API.Controllers
         [DisableRequestSizeLimit]
         public async Task<IActionResult> Upload([FromBody] FileUploadDto dto)
         {
+            if (dto.UserId != CurrentUserId) return Forbid();
+            if (dto.FolderId.HasValue && !await _context.Folders.AnyAsync(
+                f => f.Id == dto.FolderId && f.UserId == CurrentUserId && !f.IsDeleted))
+                return BadRequest("Invalid parent folder.");
             var user = await _context.Users.FindAsync(dto.UserId);
             if (user == null) return NotFound("User not found.");
             if (string.IsNullOrEmpty(user.GoogleRefreshToken)) return BadRequest("Google Drive not connected.");
@@ -59,6 +67,7 @@ namespace Encrypz.API.Controllers
         [HttpGet("user/{userId}")]
         public async Task<IActionResult> ListFiles(Guid userId, [FromQuery] Guid? folderId)
         {
+            if (userId != CurrentUserId) return Forbid();
             var query = _context.EncryptedFiles.Where(f => f.UserId == userId && !f.IsDeleted);
 
             if (folderId.HasValue)
@@ -70,7 +79,8 @@ namespace Encrypz.API.Controllers
                 query = query.Where(f => f.FolderId == null);
             }
 
-            var files = await query
+            var records = await query.ToListAsync();
+            var files = records
                 .Select(f => new FileListDto
                 {
                     Id = f.Id,
@@ -82,7 +92,7 @@ namespace Encrypz.API.Controllers
                     ThumbnailIv = f.ThumbnailIv != null ? Convert.ToBase64String(f.ThumbnailIv) : null,
                     ThumbnailAuthTag = f.ThumbnailAuthTag != null ? Convert.ToBase64String(f.ThumbnailAuthTag) : null
                 })
-                .ToListAsync();
+                .ToList();
 
             return Ok(files);
         }
@@ -90,11 +100,12 @@ namespace Encrypz.API.Controllers
         [HttpGet("{id}")]
         public async Task<IActionResult> DownloadFile(Guid id)
         {
-            var file = await _context.EncryptedFiles.Include(f => f.User).FirstOrDefaultAsync(f => f.Id == id);
-            if (file == null) return NotFound("File not found.");
-            if (string.IsNullOrEmpty(file.User.GoogleRefreshToken)) return BadRequest("Google Drive not connected.");
+            var file = await _context.EncryptedFiles.FirstOrDefaultAsync(f => f.Id == id);
+            if (file == null || file.UserId != CurrentUserId) return NotFound("File not found.");
+            var user = await _context.Users.FindAsync(file.UserId);
+            if (string.IsNullOrEmpty(user?.GoogleRefreshToken)) return BadRequest("Google Drive not connected.");
 
-            var fileBytes = await _googleDriveService.DownloadFileAsync(file.User.GoogleRefreshToken, file.GoogleDriveFileId);
+            var fileBytes = await _googleDriveService.DownloadFileAsync(user.GoogleRefreshToken, file.GoogleDriveFileId);
 
             var dto = new FileDownloadDto
             {
@@ -111,8 +122,10 @@ namespace Encrypz.API.Controllers
         [HttpGet("deleted/{userId}")]
         public async Task<IActionResult> GetDeletedFiles(Guid userId)
         {
-            var files = await _context.EncryptedFiles
-                .Where(f => f.UserId == userId && f.IsDeleted)
+            if (userId != CurrentUserId) return Forbid();
+            var records = await _context.EncryptedFiles
+                .Where(f => f.UserId == userId && f.IsDeleted).ToListAsync();
+            var files = records
                 .Select(f => new FileListDto
                 {
                     Id = f.Id,
@@ -124,7 +137,7 @@ namespace Encrypz.API.Controllers
                     ThumbnailIv = f.ThumbnailIv != null ? Convert.ToBase64String(f.ThumbnailIv) : null,
                     ThumbnailAuthTag = f.ThumbnailAuthTag != null ? Convert.ToBase64String(f.ThumbnailAuthTag) : null
                 })
-                .ToListAsync();
+                .ToList();
 
             return Ok(files);
         }
@@ -133,7 +146,7 @@ namespace Encrypz.API.Controllers
         public async Task<IActionResult> RestoreFile(Guid id)
         {
             var file = await _context.EncryptedFiles.FindAsync(id);
-            if (file == null) return NotFound("File not found.");
+            if (file == null || file.UserId != CurrentUserId) return NotFound("File not found.");
             
             file.IsDeleted = false;
             file.DeletedAt = null;
@@ -146,7 +159,7 @@ namespace Encrypz.API.Controllers
         public async Task<IActionResult> DeleteFile(Guid id) // Soft delete
         {
             var file = await _context.EncryptedFiles.FindAsync(id);
-            if (file == null) return NotFound("File not found.");
+            if (file == null || file.UserId != CurrentUserId) return NotFound("File not found.");
 
             file.IsDeleted = true;
             file.DeletedAt = DateTime.UtcNow;
@@ -158,14 +171,15 @@ namespace Encrypz.API.Controllers
         [HttpDelete("{id}/permanent")]
         public async Task<IActionResult> PermanentDeleteFile(Guid id)
         {
-            var file = await _context.EncryptedFiles.Include(f => f.User).FirstOrDefaultAsync(f => f.Id == id);
-            if (file == null) return NotFound("File not found.");
+            var file = await _context.EncryptedFiles.FirstOrDefaultAsync(f => f.Id == id);
+            if (file == null || file.UserId != CurrentUserId) return NotFound("File not found.");
 
-            if (!string.IsNullOrEmpty(file.GoogleDriveFileId) && !string.IsNullOrEmpty(file.User.GoogleRefreshToken))
+            var user = await _context.Users.FindAsync(file.UserId);
+            if (!string.IsNullOrEmpty(file.GoogleDriveFileId) && !string.IsNullOrEmpty(user?.GoogleRefreshToken))
             {
                 try
                 {
-                    await _googleDriveService.DeleteFileAsync(file.User.GoogleRefreshToken, file.GoogleDriveFileId);
+                    await _googleDriveService.DeleteFileAsync(user.GoogleRefreshToken, file.GoogleDriveFileId);
                 }
                 catch (Exception ex)
                 {

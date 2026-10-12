@@ -5,11 +5,12 @@ services:
       dockerfile: Encrypz.API.Dockerfile
     restart: unless-stopped
     environment:
-      ConnectionStrings__DefaultConnection: ${DB_CONNECTION_STRING}
+      MongoDB__ConnectionString: ${MongoDB__ConnectionString}
+      MongoDB__DatabaseName: ${MongoDB__DatabaseName:-Encrypz}
+      Frontend__Url: ${FRONTEND_URL}
       Frontend__AllowedOrigins: ${FRONTEND_URL}
       GoogleDrive__ClientId: ${GOOGLE_CLIENT_ID}
       GoogleDrive__ClientSecret: ${GOOGLE_CLIENT_SECRET}
-      GoogleDrive__RedirectUri: ${GOOGLE_REDIRECT_URI}
       ASPNETCORE_ENVIRONMENT: Production
     ports:
       - "5207:8080"

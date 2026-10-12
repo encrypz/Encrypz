@@ -1,0 +1,47 @@
+using Encrypz.Core.Entities;
+using Encrypz.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Xunit;
+
+namespace Encrypz.Tests;
+
+public class PostgreSqlMigrationTests
+{
+    private static ApplicationDbContext Database() => new(new DbContextOptionsBuilder<ApplicationDbContext>()
+        .UseNpgsql("Host=localhost;Database=encrypz;Username=postgres",
+            options => options.MigrationsHistoryTable("__EFMigrationsHistory", "encrypz"))
+        .Options);
+
+    [Fact]
+    public void FreshDatabaseScriptContainsOnlyPostgreSqlMigrations()
+    {
+        using var db = Database();
+        var migrations = db.Database.GetMigrations().ToArray();
+        Assert.Single(migrations);
+        Assert.EndsWith("_InitialPostgreSql", migrations[0]);
+        var sql = db.GetService<IMigrator>().GenerateScript(options: MigrationsSqlGenerationOptions.Idempotent);
+        Assert.Contains("CREATE SCHEMA encrypz", sql);
+        Assert.Contains("CREATE TABLE encrypz.\"Users\"", sql);
+        Assert.Contains("CREATE TABLE encrypz.\"DataProtectionKeys\"", sql);
+        Assert.Contains("CREATE TABLE encrypz.\"EncryptedFiles\"", sql);
+        Assert.Contains("CREATE TABLE encrypz.\"Folders\"", sql);
+        Assert.Contains("encrypz.\"__EFMigrationsHistory\"", sql);
+        Assert.Contains("bytea", sql);
+        Assert.Contains("uuid", sql);
+        Assert.Contains("timestamp with time zone", sql);
+        Assert.DoesNotContain("MySql", sql);
+        Assert.DoesNotContain("DROP TABLE", sql);
+    }
+
+    [Fact]
+    public void ModelAndMigrationSnapshotStayInSync()
+    {
+        using var db = Database();
+        Assert.False(db.Database.HasPendingModelChanges());
+        Assert.Equal("bytea", db.Model.FindEntityType(typeof(EncryptedFile))!
+            .FindProperty(nameof(EncryptedFile.EncryptedFileName))!.GetColumnType());
+        Assert.All(db.Model.GetEntityTypes(), entity => Assert.Equal("encrypz", entity.GetSchema()));
+    }
+}

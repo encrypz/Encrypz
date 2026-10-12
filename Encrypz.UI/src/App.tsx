@@ -16,7 +16,7 @@ function App() {
     const userId = sessionStorage.getItem('userId');
     const isConnected = sessionStorage.getItem('isGoogleDriveConnected') === 'true';
     
-    if (!userId) {
+    if (!userId || !sessionStorage.getItem('masterPassword')) {
       return <Navigate to="/login" replace />;
     }
     

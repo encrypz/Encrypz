@@ -8,6 +8,11 @@ namespace Encrypz.Core.Entities
         public Guid Id { get; set; }
         public string Username { get; set; } = string.Empty;
         
+        public string? NormalizedUsername { get; set; }
+        public string? PasswordHash { get; set; }
+
+        public string? GoogleSubject { get; set; }
+
         public string? GoogleRefreshToken { get; set; }
 
         // Navigation property

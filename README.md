@@ -1,3 +1,5 @@
+Google sign-in and Heroku setup: [HEROKU.md](HEROKU.md).
+
 # Encrypz
 
 Encrypz is a secure, zero-knowledge end-to-end encryption web application. Designed with privacy as the highest priority, Encrypz ensures that your sensitive data remains entirely secure and inaccessible to anyone except you.

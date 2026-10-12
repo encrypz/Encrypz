@@ -2,4 +2,5 @@
   <Project Path="Encrypz.API/Encrypz.API.csproj" />
   <Project Path="Encrypz.Core/Encrypz.Core.csproj" />
   <Project Path="Encrypz.Infrastructure/Encrypz.Infrastructure.csproj" />
+  <Project Path="Encrypz.Tests/Encrypz.Tests.csproj" />
 </Solution>

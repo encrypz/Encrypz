@@ -1,0 +1,9 @@
+build:
+  docker:
+    web: Heroku.Dockerfile
+release:
+  image: web
+  command:
+    - dotnet Encrypz.API.dll --initialize-db
+run:
+  web: dotnet Encrypz.API.dll

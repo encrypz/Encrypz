@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Encrypz.Core.Entities;
 using Encrypz.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -9,10 +10,12 @@ using System.Threading.Tasks;
 
 namespace Encrypz.API.Controllers
 {
+    [Authorize]
     [ApiController]
     [Route("api/[controller]")]
     public class FoldersController : ControllerBase
     {
+        private Guid CurrentUserId => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
         private readonly ApplicationDbContext _context;
 
         public FoldersController(ApplicationDbContext context)
@@ -32,6 +35,10 @@ namespace Encrypz.API.Controllers
         [HttpPost]
         public async Task<IActionResult> CreateFolder([FromBody] CreateFolderDto dto)
         {
+            if (dto.UserId != CurrentUserId) return Forbid();
+            if (dto.ParentFolderId.HasValue && !await _context.Folders.AnyAsync(
+                f => f.Id == dto.ParentFolderId && f.UserId == CurrentUserId && !f.IsDeleted))
+                return BadRequest("Invalid parent folder.");
             var folder = new Folder
             {
                 Id = Guid.NewGuid(),
@@ -51,6 +58,7 @@ namespace Encrypz.API.Controllers
         [HttpGet("user/{userId}")]
         public async Task<IActionResult> GetFolders(Guid userId, [FromQuery] Guid? parentId)
         {
+            if (userId != CurrentUserId) return Forbid();
             var query = _context.Folders.Where(f => f.UserId == userId && !f.IsDeleted);
             
             if (parentId.HasValue)
@@ -80,8 +88,13 @@ namespace Encrypz.API.Controllers
         public async Task<IActionResult> DeleteFolder(Guid id)
         {
             var folder = await _context.Folders.FindAsync(id);
-            if (folder == null) return NotFound("Folder not found.");
+            if (folder == null || folder.UserId != CurrentUserId) return NotFound("Folder not found.");
 
+            if (await _context.Folders.AnyAsync(f => f.ParentFolderId == id))
+                return Conflict("Move or remove subfolders before deleting this folder.");
+            // MongoDB has no foreign-key SET NULL; detach files in the same SaveChanges transaction.
+            var files = await _context.EncryptedFiles.Where(f => f.FolderId == id && f.UserId == CurrentUserId).ToListAsync();
+            foreach (var file in files) file.FolderId = null;
             _context.Folders.Remove(folder);
             await _context.SaveChangesAsync();
 

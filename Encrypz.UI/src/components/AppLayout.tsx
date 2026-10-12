@@ -1,11 +1,17 @@
+import axios from 'axios';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 
 export const AppLayout = () => {
     const navigate = useNavigate();
 
-    const handleLogout = () => {
-        sessionStorage.clear();
-        navigate('/login');
+    const handleLogout = async () => {
+        try {
+            await axios.post(`${import.meta.env.VITE_API_URL || '/api'}/Auth/logout`);
+            sessionStorage.clear();
+            navigate('/login');
+        } catch {
+            alert('Sign-out failed. Please try again.');
+        }
     };
 
     return (

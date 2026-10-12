@@ -14,8 +14,6 @@ namespace Encrypz.Infrastructure.Services
 {
     public interface IGoogleDriveService
     {
-        string GetAuthorizationUrl(string redirectUri);
-        Task<string> ExchangeCodeForRefreshTokenAsync(string code, string redirectUri);
         Task<string> UploadFileAsync(string refreshToken, byte[] fileBytes, string fileName);
         Task<byte[]> DownloadFileAsync(string refreshToken, string fileId);
         Task DeleteFileAsync(string refreshToken, string fileId);
@@ -59,27 +57,6 @@ namespace Encrypz.Infrastructure.Services
                 HttpClientInitializer = credential,
                 ApplicationName = "Encrypz"
             });
-        }
-
-        public string GetAuthorizationUrl(string redirectUri)
-        {
-            var flow = GetFlow();
-            var request = flow.CreateAuthorizationCodeRequest(redirectUri);
-            // The request already includes access_type=offline by default in the .NET client
-            // We just need to ensure prompt=consent is added so it always returns a refresh token
-            var url = request.Build().ToString();
-            if (!url.Contains("prompt=consent"))
-            {
-                url += "&prompt=consent";
-            }
-            return url;
-        }
-
-        public async Task<string> ExchangeCodeForRefreshTokenAsync(string code, string redirectUri)
-        {
-            var flow = GetFlow();
-            var response = await flow.ExchangeCodeForTokenAsync("user", code, redirectUri, default);
-            return response.RefreshToken;
         }
 
         private async Task<string> GetOrCreateFolderAsync(DriveService service, string folderName)

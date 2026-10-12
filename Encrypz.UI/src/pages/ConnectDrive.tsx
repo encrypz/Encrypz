@@ -1,12 +1,11 @@
 import { useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5207/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 export const ConnectDrive = () => {
     const navigate = useNavigate();
-    const location = useLocation();
     const userId = sessionStorage.getItem('userId');
 
     useEffect(() => {
@@ -19,32 +18,24 @@ export const ConnectDrive = () => {
             return;
         }
 
-        const queryParams = new URLSearchParams(location.search);
-        if (queryParams.get('connected') === 'true') {
-            sessionStorage.setItem('isGoogleDriveConnected', 'true');
-            navigate('/vault');
-            return;
-        }
-
         // If already connected, redirect to vault
         if (sessionStorage.getItem('isGoogleDriveConnected') === 'true') {
             navigate('/vault');
         }
-    }, [navigate, location, userId]);
+    }, [navigate, userId]);
 
-    const handleConnectDrive = async () => {
-        try {
-            const res = await axios.get(`${API_BASE_URL}/Auth/google-login`);
-            window.location.href = res.data.url + `&state=${userId}`;
-        } catch (e) {
-            console.error("Failed to get Google login URL", e);
-            alert("Failed to connect to Google Drive.");
-        }
+    const handleConnectDrive = () => {
+        window.location.href = `${API_BASE_URL}/Auth/google-connect`;
     };
 
-    const handleLogout = () => {
-        sessionStorage.clear();
-        navigate('/login');
+    const handleLogout = async () => {
+        try {
+            await axios.post(`${API_BASE_URL}/Auth/logout`);
+            sessionStorage.clear();
+            navigate('/login');
+        } catch {
+            alert('Sign-out failed. Please try again.');
+        }
     };
 
     return (

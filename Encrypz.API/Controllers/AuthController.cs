@@ -1,114 +1,149 @@
+using System.ComponentModel.DataAnnotations;
+using System.Text.RegularExpressions;
 using Encrypz.Core.Entities;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Security.Claims;
 using Encrypz.Infrastructure.Data;
-using Encrypz.Infrastructure.Services;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.Google;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.Threading.Tasks;
 
 namespace Encrypz.API.Controllers
 {
     [ApiController]
+    [Authorize]
     [Route("api/[controller]")]
     public class AuthController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
-        private readonly IGoogleDriveService _googleDriveService;
         private readonly IConfiguration _configuration;
 
-        public AuthController(ApplicationDbContext context, IGoogleDriveService googleDriveService, IConfiguration configuration)
+        public AuthController(ApplicationDbContext context, IConfiguration configuration)
         {
             _context = context;
-            _googleDriveService = googleDriveService;
             _configuration = configuration;
         }
 
-        public class LoginRequest
+        private static readonly PasswordHasher<User> PasswordHasher = new();
+        private static readonly string DummyHash = PasswordHasher.HashPassword(new User(), Guid.NewGuid().ToString());
+
+        public sealed class CredentialsRequest
         {
+            [Required, StringLength(32, MinimumLength = 3)]
             public string Username { get; set; } = string.Empty;
+            [Required, StringLength(128, MinimumLength = 12)]
+            public string Password { get; set; } = string.Empty;
         }
 
-        [HttpPost("login")]
-        public async Task<IActionResult> Login([FromBody] LoginRequest request)
-        {
-            if (string.IsNullOrWhiteSpace(request.Username))
-            {
-                return BadRequest("Username is required.");
-            }
-
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.Username == request.Username);
-
-            if (user == null)
-            {
-                return Unauthorized("User not found. Please register first.");
-            }
-
-            return Ok(new { UserId = user.Id, Username = user.Username });
-        }
-
+        [AllowAnonymous]
+        [EnableRateLimiting("credentials")]
         [HttpPost("register")]
-        public async Task<IActionResult> Register([FromBody] LoginRequest request)
+        public async Task<IActionResult> Register(CredentialsRequest request)
         {
-            if (string.IsNullOrWhiteSpace(request.Username))
-            {
-                return BadRequest("Username is required.");
-            }
-
-            var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.Username == request.Username);
-            if (existingUser != null)
-            {
-                return BadRequest("Username already exists.");
-            }
-
-            var user = new User
-            {
-                Id = Guid.NewGuid(),
-                Username = request.Username
-            };
-            
+            var username = request.Username.Trim();
+            if (!Regex.IsMatch(username, @"\A[a-zA-Z0-9_]{3,32}\z"))
+                return BadRequest("Use 3–32 letters, numbers, or underscores for your username.");
+            var normalized = username.ToUpperInvariant();
+            if (await _context.Users.AnyAsync(u => u.NormalizedUsername == normalized))
+                return Conflict("That username is unavailable.");
+            var user = new User { Id = Guid.NewGuid(), Username = username, NormalizedUsername = normalized };
+            user.PasswordHash = PasswordHasher.HashPassword(user, request.Password);
             _context.Users.Add(user);
-            await _context.SaveChangesAsync();
-
-            return Ok(new { UserId = user.Id, Username = user.Username, IsGoogleDriveConnected = !string.IsNullOrEmpty(user.GoogleRefreshToken) });
+            try { await _context.SaveChangesAsync(); }
+            catch (Exception exception) when (exception.ToString().Contains("E11000", StringComparison.Ordinal))
+            {
+                return Conflict("That username is unavailable.");
+            }
+            await StartSession(user);
+            return AccountSession(user);
         }
 
+        [AllowAnonymous]
+        [EnableRateLimiting("credentials")]
+        [HttpPost("login")]
+        public async Task<IActionResult> Login(CredentialsRequest request)
+        {
+            var normalized = request.Username.Trim().ToUpperInvariant();
+            var user = await _context.Users.SingleOrDefaultAsync(u => u.NormalizedUsername == normalized);
+            var result = PasswordHasher.VerifyHashedPassword(user ?? new User(), user?.PasswordHash ?? DummyHash, request.Password);
+            if (user?.PasswordHash == null || result == PasswordVerificationResult.Failed)
+                return Unauthorized("Invalid username or password.");
+            if (result == PasswordVerificationResult.SuccessRehashNeeded)
+            {
+                user.PasswordHash = PasswordHasher.HashPassword(user, request.Password);
+                await _context.SaveChangesAsync();
+            }
+            await StartSession(user);
+            return AccountSession(user);
+        }
+
+        private Task StartSession(User user) => HttpContext.SignInAsync(
+            CookieAuthenticationDefaults.AuthenticationScheme,
+            new ClaimsPrincipal(new ClaimsIdentity(new[]
+            {
+                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                new Claim(ClaimTypes.Name, user.Username)
+            }, CookieAuthenticationDefaults.AuthenticationScheme)));
+
+        private IActionResult AccountSession(User user)
+        {
+            Response.Headers.CacheControl = "no-store";
+            return Ok(new { UserId = user.Id, user.Username,
+                IsGoogleDriveConnected = !string.IsNullOrEmpty(user.GoogleRefreshToken) });
+        }
+
+        [HttpGet("google-connect")]
+        public IActionResult GoogleConnect()
+        {
+            var frontend = _configuration["Frontend:Url"] ?? "http://localhost:5173";
+            var properties = new GoogleChallengeProperties
+            {
+                RedirectUri = frontend.TrimEnd('/') + "/login?google=success", Prompt = "consent"
+            };
+            // Protected OAuth state binds linking to this authenticated account.
+            properties.Items["LinkUserId"] = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            return Challenge(properties, GoogleDefaults.AuthenticationScheme);
+        }
+
+        [AllowAnonymous]
         [HttpGet("google-login")]
         public IActionResult GoogleLogin()
         {
-            var redirectUri = _configuration["GoogleDrive:RedirectUri"] ?? "http://localhost:5207/api/Auth/google-callback";
-            var url = _googleDriveService.GetAuthorizationUrl(redirectUri);
-            return Ok(new { Url = url });
+            var frontend = _configuration["Frontend:Url"] ?? "http://localhost:5173";
+            return Challenge(new GoogleChallengeProperties
+            {
+                RedirectUri = frontend.TrimEnd('/') + "/login?google=success",
+                Prompt = "consent"
+            }, GoogleDefaults.AuthenticationScheme);
         }
 
-        [HttpGet("google-callback")]
-        public async Task<IActionResult> GoogleCallback([FromQuery] string code, [FromQuery] string state)
+        [HttpGet("session")]
+        public async Task<IActionResult> Session()
         {
-            // For simplicity in MVP, we might pass the userId in the state parameter
-            if (string.IsNullOrEmpty(code) || !Guid.TryParse(state, out var userId))
-            {
-                return BadRequest("Invalid callback parameters.");
-            }
+            var id = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+            var user = await _context.Users.FindAsync(id);
+            if (user == null) return Unauthorized();
+            Response.Headers.CacheControl = "no-store";
+            return Ok(new { UserId = user.Id, user.Username,
+                IsGoogleDriveConnected = !string.IsNullOrEmpty(user.GoogleRefreshToken) });
+        }
 
-            var redirectUri = _configuration["GoogleDrive:RedirectUri"] ?? "http://localhost:5207/api/Auth/google-callback";
-            var refreshToken = await _googleDriveService.ExchangeCodeForRefreshTokenAsync(code, redirectUri);
-
-            var user = await _context.Users.FindAsync(userId);
-            if (user != null)
-            {
-                user.GoogleRefreshToken = refreshToken;
-                await _context.SaveChangesAsync();
-            }
-
-            // Redirect back to frontend with success flag
-            var frontendUrl = _configuration["Frontend:AllowedOrigins"]?.Split(',')[0] ?? "http://localhost:5173";
-            return Redirect($"{frontendUrl}/connect?connected=true");
+        [HttpPost("logout")]
+        public async Task<IActionResult> Logout()
+        {
+            await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            return NoContent();
         }
 
         [HttpGet("user/{userId}")]
         public async Task<IActionResult> GetUserProfile(Guid userId)
         {
+            if (User.FindFirstValue(ClaimTypes.NameIdentifier) != userId.ToString()) return Forbid();
             var user = await _context.Users
-                .Include(u => u.EncryptedFiles)
                 .FirstOrDefaultAsync(u => u.Id == userId);
                 
             if (user == null) return NotFound("User not found.");
@@ -119,7 +154,7 @@ namespace Encrypz.API.Controllers
             {
                 Username = user.Username,
                 IsGoogleDriveConnected = !string.IsNullOrEmpty(user.GoogleRefreshToken),
-                FileCount = user.EncryptedFiles.Count,
+                FileCount = await _context.EncryptedFiles.CountAsync(f => f.UserId == userId),
                 FolderCount = folderCount
             });
         }

@@ -120,11 +120,25 @@ namespace Encrypz.Infrastructure.Migrations
                     b.ToTable("Folders");
                 });
 
+            modelBuilder.Entity("Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey", b =>
+                {
+                    b.Property<int>("Id").ValueGeneratedOnAdd().HasColumnType("int");
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+                    b.Property<string>("FriendlyName").HasColumnType("longtext");
+                    b.Property<string>("Xml").HasColumnType("longtext");
+                    b.HasKey("Id");
+                    b.ToTable("DataProtectionKeys");
+                });
+
             modelBuilder.Entity("Encrypz.Core.Entities.User", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("char(36)");
+
+                    b.Property<string>("GoogleSubject")
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)");
 
                     b.Property<string>("GoogleRefreshToken")
                         .HasColumnType("longtext");
@@ -135,6 +149,8 @@ namespace Encrypz.Infrastructure.Migrations
                         .HasColumnType("varchar(256)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("GoogleSubject").IsUnique();
 
                     b.ToTable("Users");
                 });

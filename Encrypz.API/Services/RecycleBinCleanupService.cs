@@ -54,17 +54,17 @@ namespace Encrypz.API.Services
 
             // Cleanup Files
             var filesToDelete = await context.EncryptedFiles
-                .Include(f => f.User)
                 .Where(f => f.IsDeleted && f.DeletedAt <= oneHourAgo)
                 .ToListAsync(stoppingToken);
 
             foreach (var file in filesToDelete)
             {
-                if (!string.IsNullOrEmpty(file.GoogleDriveFileId) && !string.IsNullOrEmpty(file.User.GoogleRefreshToken))
+                var user = await context.Users.FindAsync(new object[] { file.UserId }, stoppingToken);
+                if (!string.IsNullOrEmpty(file.GoogleDriveFileId) && !string.IsNullOrEmpty(user?.GoogleRefreshToken))
                 {
                     try
                     {
-                        await googleDriveService.DeleteFileAsync(file.User.GoogleRefreshToken, file.GoogleDriveFileId);
+                        await googleDriveService.DeleteFileAsync(user.GoogleRefreshToken, file.GoogleDriveFileId);
                     }
                     catch (Exception ex)
                     {
@@ -82,7 +82,13 @@ namespace Encrypz.API.Services
             
             if (foldersToDelete.Any())
             {
-                context.Folders.RemoveRange(foldersToDelete);
+                foreach (var folder in foldersToDelete)
+                {
+                    if (await context.Folders.AnyAsync(f => f.ParentFolderId == folder.Id, stoppingToken)) continue;
+                    var remainingFiles = await context.EncryptedFiles.Where(f => f.FolderId == folder.Id).ToListAsync(stoppingToken);
+                    foreach (var file in remainingFiles) file.FolderId = null;
+                    context.Folders.Remove(folder);
+                }
                 _logger.LogInformation($"Permanently deleted {foldersToDelete.Count} folders.");
             }
 
