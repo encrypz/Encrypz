@@ -16,6 +16,8 @@ namespace Encrypz.Core.DTOs
         public string? EncryptedThumbnail { get; set; } // Base64
         public string? ThumbnailIv { get; set; } // Base64
         public string? ThumbnailAuthTag { get; set; } // Base64
+
+        public Guid? GoogleAccountId { get; set; }
     }
 
     public class FileListDto
@@ -25,6 +27,9 @@ namespace Encrypz.Core.DTOs
         public long FileSize { get; set; }
         public DateTime UploadedAt { get; set; }
         public Guid? FolderId { get; set; }
+
+        public Guid? GoogleAccountId { get; set; }
+        public string? GoogleAccountEmail { get; set; }
 
         public string? EncryptedThumbnail { get; set; }
         public string? ThumbnailIv { get; set; }

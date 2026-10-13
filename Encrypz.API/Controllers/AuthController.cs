@@ -35,7 +35,7 @@ namespace Encrypz.API.Controllers
         {
             [Required, StringLength(32, MinimumLength = 3)]
             public string Username { get; set; } = string.Empty;
-            [Required, StringLength(128, MinimumLength = 12)]
+            [Required, StringLength(128, MinimumLength = 6)]
             public string Password { get; set; } = string.Empty;
         }
 
@@ -59,7 +59,7 @@ namespace Encrypz.API.Controllers
                 return Conflict("That username is unavailable.");
             }
             await StartSession(user);
-            return AccountSession(user);
+            return await AccountSession(user);
         }
 
         [AllowAnonymous]
@@ -78,7 +78,7 @@ namespace Encrypz.API.Controllers
                 await _context.SaveChangesAsync();
             }
             await StartSession(user);
-            return AccountSession(user);
+            return await AccountSession(user);
         }
 
         private Task StartSession(User user) => HttpContext.SignInAsync(
@@ -89,20 +89,36 @@ namespace Encrypz.API.Controllers
                 new Claim(ClaimTypes.Name, user.Username)
             }, CookieAuthenticationDefaults.AuthenticationScheme)));
 
-        private IActionResult AccountSession(User user)
+        private async Task<IActionResult> AccountSession(User user)
         {
             Response.Headers.CacheControl = "no-store";
-            return Ok(new { UserId = user.Id, user.Username,
-                IsGoogleDriveConnected = !string.IsNullOrEmpty(user.GoogleRefreshToken) });
+            var accounts = await _context.GoogleAccounts
+                .Where(g => g.UserId == user.Id)
+                .OrderByDescending(g => g.ConnectedAt)
+                .Select(g => new { g.Id, g.Email, g.DisplayName, g.ConnectedAt })
+                .ToListAsync();
+
+            return Ok(new
+            {
+                UserId = user.Id,
+                user.Username,
+                IsGoogleDriveConnected = !string.IsNullOrEmpty(user.GoogleRefreshToken) || accounts.Count > 0,
+                GoogleAccountsCount = accounts.Count,
+                GoogleAccounts = accounts
+            });
         }
 
         [HttpGet("google-connect")]
-        public IActionResult GoogleConnect()
+        public IActionResult GoogleConnect([FromQuery] string? prompt = "select_account consent", [FromQuery] string? redirect = null)
         {
             var frontend = _configuration["Frontend:Url"] ?? "http://localhost:5173";
+            var target = !string.IsNullOrEmpty(redirect)
+                ? redirect
+                : frontend.TrimEnd('/') + "/login?google=success";
             var properties = new GoogleChallengeProperties
             {
-                RedirectUri = frontend.TrimEnd('/') + "/login?google=success", Prompt = "consent"
+                RedirectUri = target,
+                Prompt = prompt ?? "select_account consent"
             };
             // Protected OAuth state binds linking to this authenticated account.
             properties.Items["LinkUserId"] = User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -117,8 +133,56 @@ namespace Encrypz.API.Controllers
             return Challenge(new GoogleChallengeProperties
             {
                 RedirectUri = frontend.TrimEnd('/') + "/login?google=success",
-                Prompt = "consent"
+                Prompt = "select_account consent"
             }, GoogleDefaults.AuthenticationScheme);
+        }
+
+        [HttpGet("google-accounts")]
+        public async Task<IActionResult> GetGoogleAccounts()
+        {
+            var currentUserId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+            var accounts = await _context.GoogleAccounts
+                .Where(g => g.UserId == currentUserId)
+                .OrderByDescending(g => g.ConnectedAt)
+                .Select(g => new
+                {
+                    g.Id,
+                    g.Email,
+                    g.DisplayName,
+                    g.ConnectedAt
+                })
+                .ToListAsync();
+
+            return Ok(accounts);
+        }
+
+        [HttpDelete("google-accounts/{id}")]
+        public async Task<IActionResult> DisconnectGoogleAccount(Guid id)
+        {
+            var currentUserId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+            var account = await _context.GoogleAccounts.FirstOrDefaultAsync(g => g.Id == id && g.UserId == currentUserId);
+            if (account == null) return NotFound("Connected Google account not found.");
+
+            _context.GoogleAccounts.Remove(account);
+
+            var user = await _context.Users.FindAsync(currentUserId);
+            if (user != null && user.GoogleSubject == account.GoogleSubject)
+            {
+                var nextAccount = await _context.GoogleAccounts.FirstOrDefaultAsync(g => g.UserId == currentUserId && g.Id != id);
+                if (nextAccount != null)
+                {
+                    user.GoogleSubject = nextAccount.GoogleSubject;
+                    user.GoogleRefreshToken = nextAccount.RefreshToken;
+                }
+                else
+                {
+                    user.GoogleSubject = null;
+                    user.GoogleRefreshToken = null;
+                }
+            }
+
+            await _context.SaveChangesAsync();
+            return NoContent();
         }
 
         [HttpGet("session")]
@@ -127,9 +191,7 @@ namespace Encrypz.API.Controllers
             var id = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
             var user = await _context.Users.FindAsync(id);
             if (user == null) return Unauthorized();
-            Response.Headers.CacheControl = "no-store";
-            return Ok(new { UserId = user.Id, user.Username,
-                IsGoogleDriveConnected = !string.IsNullOrEmpty(user.GoogleRefreshToken) });
+            return await AccountSession(user);
         }
 
         [HttpPost("logout")]
@@ -148,14 +210,21 @@ namespace Encrypz.API.Controllers
                 
             if (user == null) return NotFound("User not found.");
 
+            var accounts = await _context.GoogleAccounts
+                .Where(g => g.UserId == userId)
+                .OrderByDescending(g => g.ConnectedAt)
+                .Select(g => new { g.Id, g.Email, g.DisplayName, g.ConnectedAt })
+                .ToListAsync();
+
             var folderCount = await _context.Folders.CountAsync(f => f.UserId == userId);
 
             return Ok(new
             {
                 Username = user.Username,
-                IsGoogleDriveConnected = !string.IsNullOrEmpty(user.GoogleRefreshToken),
+                IsGoogleDriveConnected = !string.IsNullOrEmpty(user.GoogleRefreshToken) || accounts.Count > 0,
                 FileCount = await _context.EncryptedFiles.CountAsync(f => f.UserId == userId),
-                FolderCount = folderCount
+                FolderCount = folderCount,
+                GoogleAccounts = accounts
             });
         }
     }

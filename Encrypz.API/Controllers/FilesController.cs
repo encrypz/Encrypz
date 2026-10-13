@@ -37,10 +37,22 @@ namespace Encrypz.API.Controllers
                 return BadRequest("Invalid parent folder.");
             var user = await _context.Users.FindAsync(dto.UserId);
             if (user == null) return NotFound("User not found.");
-            if (string.IsNullOrEmpty(user.GoogleRefreshToken)) return BadRequest("Google Drive not connected.");
+
+            ConnectedGoogleAccount? account = null;
+            if (dto.GoogleAccountId.HasValue)
+            {
+                account = await _context.GoogleAccounts.FirstOrDefaultAsync(g => g.Id == dto.GoogleAccountId.Value && g.UserId == CurrentUserId);
+            }
+            if (account == null)
+            {
+                account = await _context.GoogleAccounts.FirstOrDefaultAsync(g => g.UserId == CurrentUserId);
+            }
+
+            var refreshToken = account?.RefreshToken ?? user.GoogleRefreshToken;
+            if (string.IsNullOrEmpty(refreshToken)) return BadRequest("Google Drive not connected.");
 
             var fileBytes = Convert.FromBase64String(dto.Payload);
-            var driveFileId = await _googleDriveService.UploadFileAsync(user.GoogleRefreshToken, fileBytes, "encrypz_file_" + Guid.NewGuid().ToString());
+            var driveFileId = await _googleDriveService.UploadFileAsync(refreshToken, fileBytes, "encrypz_file_" + Guid.NewGuid().ToString());
 
             var file = new EncryptedFile
             {
@@ -53,6 +65,8 @@ namespace Encrypz.API.Controllers
                 UploadedAt = DateTime.UtcNow,
                 UserId = dto.UserId,
                 FolderId = dto.FolderId,
+                GoogleAccountId = account?.Id,
+                GoogleAccountEmail = account?.Email,
                 EncryptedThumbnail = string.IsNullOrEmpty(dto.EncryptedThumbnail) ? null : Convert.FromBase64String(dto.EncryptedThumbnail),
                 ThumbnailIv = string.IsNullOrEmpty(dto.ThumbnailIv) ? null : Convert.FromBase64String(dto.ThumbnailIv),
                 ThumbnailAuthTag = string.IsNullOrEmpty(dto.ThumbnailAuthTag) ? null : Convert.FromBase64String(dto.ThumbnailAuthTag)
@@ -85,9 +99,11 @@ namespace Encrypz.API.Controllers
                 {
                     Id = f.Id,
                     EncryptedFileName = Convert.ToBase64String(f.EncryptedFileName),
-                FileSize = f.FileSize,
-                UploadedAt = f.UploadedAt,
+                    FileSize = f.FileSize,
+                    UploadedAt = f.UploadedAt,
                     FolderId = f.FolderId,
+                    GoogleAccountId = f.GoogleAccountId,
+                    GoogleAccountEmail = f.GoogleAccountEmail,
                     EncryptedThumbnail = f.EncryptedThumbnail != null ? Convert.ToBase64String(f.EncryptedThumbnail) : null,
                     ThumbnailIv = f.ThumbnailIv != null ? Convert.ToBase64String(f.ThumbnailIv) : null,
                     ThumbnailAuthTag = f.ThumbnailAuthTag != null ? Convert.ToBase64String(f.ThumbnailAuthTag) : null
@@ -102,10 +118,27 @@ namespace Encrypz.API.Controllers
         {
             var file = await _context.EncryptedFiles.FirstOrDefaultAsync(f => f.Id == id);
             if (file == null || file.UserId != CurrentUserId) return NotFound("File not found.");
-            var user = await _context.Users.FindAsync(file.UserId);
-            if (string.IsNullOrEmpty(user?.GoogleRefreshToken)) return BadRequest("Google Drive not connected.");
 
-            var fileBytes = await _googleDriveService.DownloadFileAsync(user.GoogleRefreshToken, file.GoogleDriveFileId);
+            string? refreshToken = null;
+            if (file.GoogleAccountId.HasValue)
+            {
+                var account = await _context.GoogleAccounts.FirstOrDefaultAsync(g => g.Id == file.GoogleAccountId.Value && g.UserId == CurrentUserId);
+                refreshToken = account?.RefreshToken;
+            }
+            if (string.IsNullOrEmpty(refreshToken))
+            {
+                var user = await _context.Users.FindAsync(file.UserId);
+                refreshToken = user?.GoogleRefreshToken;
+            }
+            if (string.IsNullOrEmpty(refreshToken))
+            {
+                var anyAccount = await _context.GoogleAccounts.FirstOrDefaultAsync(g => g.UserId == CurrentUserId);
+                refreshToken = anyAccount?.RefreshToken;
+            }
+
+            if (string.IsNullOrEmpty(refreshToken)) return BadRequest("Google Drive not connected.");
+
+            var fileBytes = await _googleDriveService.DownloadFileAsync(refreshToken, file.GoogleDriveFileId);
 
             var dto = new FileDownloadDto
             {
@@ -130,9 +163,11 @@ namespace Encrypz.API.Controllers
                 {
                     Id = f.Id,
                     EncryptedFileName = Convert.ToBase64String(f.EncryptedFileName),
-                FileSize = f.FileSize,
-                UploadedAt = f.UploadedAt,
+                    FileSize = f.FileSize,
+                    UploadedAt = f.UploadedAt,
                     FolderId = f.FolderId,
+                    GoogleAccountId = f.GoogleAccountId,
+                    GoogleAccountEmail = f.GoogleAccountEmail,
                     EncryptedThumbnail = f.EncryptedThumbnail != null ? Convert.ToBase64String(f.EncryptedThumbnail) : null,
                     ThumbnailIv = f.ThumbnailIv != null ? Convert.ToBase64String(f.ThumbnailIv) : null,
                     ThumbnailAuthTag = f.ThumbnailAuthTag != null ? Convert.ToBase64String(f.ThumbnailAuthTag) : null
@@ -174,12 +209,28 @@ namespace Encrypz.API.Controllers
             var file = await _context.EncryptedFiles.FirstOrDefaultAsync(f => f.Id == id);
             if (file == null || file.UserId != CurrentUserId) return NotFound("File not found.");
 
-            var user = await _context.Users.FindAsync(file.UserId);
-            if (!string.IsNullOrEmpty(file.GoogleDriveFileId) && !string.IsNullOrEmpty(user?.GoogleRefreshToken))
+            string? refreshToken = null;
+            if (file.GoogleAccountId.HasValue)
+            {
+                var account = await _context.GoogleAccounts.FirstOrDefaultAsync(g => g.Id == file.GoogleAccountId.Value && g.UserId == CurrentUserId);
+                refreshToken = account?.RefreshToken;
+            }
+            if (string.IsNullOrEmpty(refreshToken))
+            {
+                var user = await _context.Users.FindAsync(file.UserId);
+                refreshToken = user?.GoogleRefreshToken;
+            }
+            if (string.IsNullOrEmpty(refreshToken))
+            {
+                var anyAccount = await _context.GoogleAccounts.FirstOrDefaultAsync(g => g.UserId == CurrentUserId);
+                refreshToken = anyAccount?.RefreshToken;
+            }
+
+            if (!string.IsNullOrEmpty(file.GoogleDriveFileId) && !string.IsNullOrEmpty(refreshToken))
             {
                 try
                 {
-                    await _googleDriveService.DeleteFileAsync(user.GoogleRefreshToken, file.GoogleDriveFileId);
+                    await _googleDriveService.DeleteFileAsync(refreshToken, file.GoogleDriveFileId);
                 }
                 catch (Exception ex)
                 {

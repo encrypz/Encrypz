@@ -11,10 +11,18 @@ public class ApplicationDbContext : DbContext
     public DbSet<User> Users { get; set; } = null!;
     public DbSet<EncryptedFile> EncryptedFiles { get; set; } = null!;
     public DbSet<Folder> Folders { get; set; } = null!;
+    public DbSet<ConnectedGoogleAccount> GoogleAccounts { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+        modelBuilder.Entity<ConnectedGoogleAccount>(entity =>
+        {
+            entity.ToCollection("GoogleAccounts");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.GoogleSubject).IsRequired();
+            entity.Property(e => e.RefreshToken).IsRequired();
+        });
         modelBuilder.Entity<User>(entity =>
         {
             entity.ToCollection("Users");

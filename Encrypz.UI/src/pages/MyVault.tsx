@@ -19,6 +19,8 @@ interface FileItem {
     folderId: string | null;
     fileSize?: number;
     uploadedAt?: string;
+    googleAccountId?: string | null;
+    googleAccountEmail?: string | null;
     encryptedThumbnail?: string | null;
     thumbnailIv?: string | null;
     thumbnailAuthTag?: string | null;
@@ -601,6 +603,14 @@ export const MyVault = () => {
                                             AES-256-GCM Encrypted
                                         </span>
                                     </div>
+                                    {files.find(f => f.id === selectedItem.id)?.googleAccountEmail && (
+                                        <div className="metadata-item">
+                                            <span className="metadata-label">Google Drive</span>
+                                            <span className="metadata-value" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                                                {files.find(f => f.id === selectedItem.id)!.googleAccountEmail}
+                                            </span>
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="panel-actions" style={{ flexDirection: 'row', gap: '8px', padding: '16px 0', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
                                     <button 

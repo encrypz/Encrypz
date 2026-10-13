@@ -191,15 +191,86 @@ public class SignInFlowTests
         Assert.Null((await scope.ServiceProvider.GetRequiredService<ApplicationDbContext>().Users.SingleAsync()).GoogleSubject);
     }
 
+    [Fact]
+    public async Task OneUserCanConnectMultipleGoogleAccountsAndFilesArePrivate()
+    {
+        await using var factory = new TestApplication();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+            { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
+        client.DefaultRequestHeaders.Add("Origin", "https://localhost");
+
+        // 1. Register an account
+        var regRes = await client.PostAsJsonAsync("/api/Auth/register", new { username = "SecretVaultOwner", password = "SecurePassword123!" });
+        Assert.Equal(HttpStatusCode.OK, regRes.StatusCode);
+        var regJson = JsonDocument.Parse(await regRes.Content.ReadAsStringAsync()).RootElement;
+        var userId = Guid.Parse(regJson.GetProperty("userId").GetString()!);
+
+        // 2. Connect 1st Google Account
+        GoogleBackchannel.CurrentSubject = "google-sub-1";
+        GoogleBackchannel.CurrentEmail = "user1@gmail.com";
+        var challenge1 = await client.GetAsync("/api/Auth/google-connect");
+        var state1 = QueryHelpers.ParseQuery(challenge1.Headers.Location!.Query)["state"].ToString();
+        var callback1 = await client.GetAsync(QueryHelpers.AddQueryString("/api/Auth/google-callback?code=code-1", "state", state1));
+        Assert.Equal(HttpStatusCode.Redirect, callback1.StatusCode);
+
+        // 3. Connect 2nd Google Account to the same Encrypz account
+        GoogleBackchannel.CurrentSubject = "google-sub-2";
+        GoogleBackchannel.CurrentEmail = "user2@company.com";
+        var challenge2 = await client.GetAsync("/api/Auth/google-connect");
+        var state2 = QueryHelpers.ParseQuery(challenge2.Headers.Location!.Query)["state"].ToString();
+        var callback2 = await client.GetAsync(QueryHelpers.AddQueryString("/api/Auth/google-callback?code=code-2", "state", state2));
+        Assert.Equal(HttpStatusCode.Redirect, callback2.StatusCode);
+
+        // 4. Verify Google accounts list returns 2 accounts for this user
+        var accountsRes = await client.GetAsync("/api/Auth/google-accounts");
+        Assert.Equal(HttpStatusCode.OK, accountsRes.StatusCode);
+        var accountsJson = JsonDocument.Parse(await accountsRes.Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal(2, accountsJson.GetArrayLength());
+
+        // 5. Verify database has 2 ConnectedGoogleAccount entities for this user
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var connected = await db.GoogleAccounts.Where(g => g.UserId == userId).ToListAsync();
+            Assert.Equal(2, connected.Count);
+            Assert.Contains(connected, a => a.GoogleSubject == "google-sub-1");
+            Assert.Contains(connected, a => a.GoogleSubject == "google-sub-2");
+        }
+    }
+
     private sealed class GoogleBackchannel : HttpMessageHandler
     {
+        public static string CurrentSubject = "test-subject";
+        public static string CurrentEmail = "owner@example.com";
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var json = request.RequestUri!.AbsolutePath.EndsWith("/token")
                 ? """{"access_token":"test-access","refresh_token":"test-refresh","token_type":"Bearer","expires_in":3600,"scope":"openid email profile https://www.googleapis.com/auth/drive.file"}"""
-                : """{"sub":"test-subject","email":"owner@example.com","name":"Owner"}""";
+                : $$"""{"sub":"{{CurrentSubject}}","email":"{{CurrentEmail}}","name":"Owner"}""";
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 { Content = new StringContent(json, Encoding.UTF8, "application/json") });
+        }
+    }
+
+    private sealed class StreamJsonOutputFormatter : Microsoft.AspNetCore.Mvc.Formatters.TextOutputFormatter
+    {
+        private static readonly JsonSerializerOptions JsonOptions = new()
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        };
+
+        public StreamJsonOutputFormatter()
+        {
+            SupportedMediaTypes.Add("application/json");
+            SupportedMediaTypes.Add("text/json");
+            SupportedMediaTypes.Add("text/plain");
+            SupportedEncodings.Add(Encoding.UTF8);
+        }
+        public override bool CanWriteResult(Microsoft.AspNetCore.Mvc.Formatters.OutputFormatterCanWriteContext context) => true;
+        public override async Task WriteResponseBodyAsync(Microsoft.AspNetCore.Mvc.Formatters.OutputFormatterWriteContext context, Encoding selectedEncoding)
+        {
+            await JsonSerializer.SerializeAsync(context.HttpContext.Response.Body, context.Object, context.ObjectType ?? typeof(object), JsonOptions);
         }
     }
 
@@ -226,6 +297,12 @@ public class SignInFlowTests
                 services.RemoveAll<ApplicationDbContext>();
                 services.RemoveAll<DbContextOptions<ApplicationDbContext>>();
                 services.AddDbContext<ApplicationDbContext>(options => options.UseInMemoryDatabase(databaseName));
+                services.PostConfigure<Microsoft.AspNetCore.Mvc.MvcOptions>(options =>
+                {
+                    options.OutputFormatters.RemoveType<Microsoft.AspNetCore.Mvc.Formatters.SystemTextJsonOutputFormatter>();
+                    options.OutputFormatters.Insert(0, new StreamJsonOutputFormatter());
+                    options.OutputFormatters.Add(new Microsoft.AspNetCore.Mvc.Formatters.StringOutputFormatter());
+                });
                 var cleanup = services.FirstOrDefault(service => service.ServiceType == typeof(IHostedService)
                     && service.ImplementationType == typeof(RecycleBinCleanupService));
                 if (cleanup != null) services.Remove(cleanup);

@@ -21,6 +21,10 @@ namespace Encrypz.Core.Entities
 
         // Foreign Key
         public Guid UserId { get; set; }
+
+        // Specific connected Google account where the file is stored
+        public Guid? GoogleAccountId { get; set; }
+        public string? GoogleAccountEmail { get; set; }
         
         // Navigation property
         public User User { get; set; } = null!;

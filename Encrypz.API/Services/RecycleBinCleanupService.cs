@@ -60,11 +60,22 @@ namespace Encrypz.API.Services
             foreach (var file in filesToDelete)
             {
                 var user = await context.Users.FindAsync(new object[] { file.UserId }, stoppingToken);
-                if (!string.IsNullOrEmpty(file.GoogleDriveFileId) && !string.IsNullOrEmpty(user?.GoogleRefreshToken))
+                string? refreshToken = null;
+                if (file.GoogleAccountId.HasValue)
+                {
+                    var acct = await context.GoogleAccounts.FindAsync(new object[] { file.GoogleAccountId.Value }, stoppingToken);
+                    refreshToken = acct?.RefreshToken;
+                }
+                if (string.IsNullOrEmpty(refreshToken))
+                {
+                    refreshToken = user?.GoogleRefreshToken;
+                }
+
+                if (!string.IsNullOrEmpty(file.GoogleDriveFileId) && !string.IsNullOrEmpty(refreshToken))
                 {
                     try
                     {
-                        await googleDriveService.DeleteFileAsync(user.GoogleRefreshToken, file.GoogleDriveFileId);
+                        await googleDriveService.DeleteFileAsync(refreshToken, file.GoogleDriveFileId);
                     }
                     catch (Exception ex)
                     {

@@ -13,6 +13,12 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 
 
+interface GoogleAccountItem {
+    id: string;
+    email?: string;
+    displayName?: string;
+}
+
 export const Upload = () => {
 
     const navigate = useNavigate();
@@ -27,9 +33,17 @@ export const Upload = () => {
     const [uploading, setUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState<{current: number, total: number} | null>(null);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
+    const [googleAccounts, setGoogleAccounts] = useState<GoogleAccountItem[]>([]);
+    const [selectedAccountId, setSelectedAccountId] = useState<string>('');
 
     useEffect(() => {
         document.title = "Encrypz - Upload Files";
+        axios.get<GoogleAccountItem[]>(`${API_BASE_URL}/Auth/google-accounts`)
+            .then(res => {
+                setGoogleAccounts(res.data);
+                if (res.data.length > 0) setSelectedAccountId(res.data[0].id);
+            })
+            .catch(() => {});
     }, []);
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -78,6 +92,7 @@ export const Upload = () => {
                     authenticationTag: arrayBufferToBase64(encrypted.authTag),
                     userId: userId,
                     folderId: folderId,
+                    googleAccountId: selectedAccountId || undefined,
                     encryptedThumbnail: encryptedThumbnail,
                     thumbnailIv: thumbnailIv,
                     thumbnailAuthTag: thumbnailAuthTag
@@ -117,9 +132,38 @@ export const Upload = () => {
                     </svg>
                 </div>
                 <h2 style={{ margin: '0 0 16px 0' }}>Secure Upload</h2>
-                <p style={{ color: 'var(--text-muted)', marginBottom: '32px', fontSize: '1.05rem' }}>
+                <p style={{ color: 'var(--text-muted)', marginBottom: '24px', fontSize: '1.05rem' }}>
                     Drag & drop files here to encrypt them instantly. Your file never touches our servers unencrypted. It is encrypted in your browser and securely stored in your Google Drive.
                 </p>
+
+                {googleAccounts.length > 1 && (
+                    <div style={{ marginBottom: '24px', textAlign: 'left', maxWidth: '340px', margin: '0 auto 24px auto' }}>
+                        <label htmlFor="google-account-select" style={{ display: 'block', marginBottom: '6px', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                            Target Google Drive Account:
+                        </label>
+                        <select
+                            id="google-account-select"
+                            value={selectedAccountId}
+                            onChange={e => setSelectedAccountId(e.target.value)}
+                            style={{
+                                width: '100%',
+                                padding: '10px 12px',
+                                borderRadius: '8px',
+                                background: '#1c1f26',
+                                border: '1px solid var(--surface-border)',
+                                color: 'var(--text-primary)',
+                                fontSize: '0.9rem'
+                            }}
+                        >
+                            {googleAccounts.map(account => (
+                                <option key={account.id} value={account.id}>
+                                    {account.email || account.displayName || 'Google Account'}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                )}
+
                 <div style={{ position: 'relative', display: 'inline-block', width: '100%', maxWidth: '300px' }}>
                     <input 
                         type="file" 
