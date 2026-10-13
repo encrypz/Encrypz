@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { lockVault } from '../utils/crypto';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 
 export const AppLayout = () => {
@@ -8,6 +9,7 @@ export const AppLayout = () => {
         try {
             await axios.post(`${import.meta.env.VITE_API_URL || '/api'}/Auth/logout`);
             sessionStorage.clear();
+            lockVault();
             navigate('/login');
         } catch {
             alert('Sign-out failed. Please try again.');

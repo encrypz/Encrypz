@@ -2,7 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import './Vault.css';
 import { 
-    deriveKey,
+    getVaultKey,
+    encryptName,
+    decryptName,
     arrayBufferToBase64, 
     decryptData, 
     base64ToArrayBuffer, 
@@ -37,7 +39,7 @@ type FilterType = 'All' | 'Photos' | 'Videos' | 'Documents';
 
 export const MyVault = () => {
     const userId = sessionStorage.getItem('userId');
-    const masterPassword = sessionStorage.getItem('masterPassword');
+    const vaultKey = getVaultKey();
     const username = sessionStorage.getItem('username'); 
 
     const [files, setFiles] = useState<FileItem[]>([]);
@@ -76,7 +78,7 @@ export const MyVault = () => {
     });
 
     useEffect(() => {
-        if (userId && masterPassword && username) {
+        if (userId && vaultKey && username) {
             fetchContents(currentFolderId);
         }
     }, [userId, currentFolderId]);
@@ -101,15 +103,14 @@ export const MyVault = () => {
     };
 
     const decryptNames = async (fileList: FileItem[], folderList: FolderItem[]) => {
-        if (!masterPassword || !username) return;
+        if (!vaultKey || !username) return;
         const names: Record<string, string> = {};
         const thumbnails: Record<string, string> = {};
-        const key = await deriveKey(masterPassword, username);
+        const key = vaultKey!;
 
         for (const file of fileList) {
             try {
-                const fileNameBytes = base64ToArrayBuffer(file.encryptedFileName);
-                names[file.id] = uint8ArrayToString(fileNameBytes);
+                names[file.id] = await decryptName(file.encryptedFileName, key);
             } catch {
                 names[file.id] = `Encrypted File (${file.id.substring(0, 8)})`;
             }
@@ -145,11 +146,11 @@ export const MyVault = () => {
         const folderName = prompt('Enter folder name:');
         if (!folderName) return;
         
-        if (!masterPassword || !username || !userId) return;
+        if (!vaultKey || !username || !userId) return;
 
         setLoading(true);
         try {
-            const key = await deriveKey(masterPassword, username);
+            const key = vaultKey!;
             const folderNameBytes = new TextEncoder().encode(folderName);
             const { payload: encryptedData, iv, authTag } = await encryptData(folderNameBytes, key);
 
@@ -196,12 +197,12 @@ export const MyVault = () => {
         setLoading(true);
         try {
             const response = await axios.get(`${API_BASE_URL}/Files/${fileId}/download`);
-            const { encryptedData, initializationVector, authenticationTag } = response.data;
+            const { payload, initializationVector, authenticationTag } = response.data;
             
-            if (!masterPassword || !username) throw new Error("Missing credentials");
-            const key = await deriveKey(masterPassword, username);
+            if (!vaultKey || !username) throw new Error("Missing credentials");
+            const key = vaultKey!;
             
-            const payloadBytes = base64ToArrayBuffer(encryptedData);
+            const payloadBytes = base64ToArrayBuffer(payload);
             const ivBytes = base64ToArrayBuffer(initializationVector);
             const tagBytes = base64ToArrayBuffer(authenticationTag);
             
@@ -244,14 +245,14 @@ export const MyVault = () => {
     const handleVaultFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
         if (!event.target.files || event.target.files.length === 0) return;
         
-        if (!userId || !masterPassword || !username) {
+        if (!userId || !vaultKey || !username) {
             alert('Authentication details missing. Please log in again.');
             return;
         }
 
         setUploading(true);
         try {
-            const key = await deriveKey(masterPassword, username);
+            const key = vaultKey!;
             const files = Array.from(event.target.files);
 
             for (const file of files) {
@@ -259,8 +260,7 @@ export const MyVault = () => {
                 const fileBytes = new Uint8Array(arrayBuffer);
                 const { payload: encryptedData, iv, authTag } = await encryptData(fileBytes, key);
 
-                const fileNameBytes = new TextEncoder().encode(file.name);
-                const encryptedFileNameBytes = fileNameBytes;
+                const encryptedFileName = await encryptName(file.name, key);
 
                 let thumbPayload = null, thumbIv = null, thumbTag = null;
                 if (file.type.startsWith('image/') || file.type.startsWith('video/')) {
@@ -279,7 +279,7 @@ export const MyVault = () => {
                     userId,
                     folderId: currentFolderId,
                     fileSize: file.size,
-                    encryptedFileName: arrayBufferToBase64(new Uint8Array(encryptedFileNameBytes)),
+                    encryptedFileName,
                     payload: arrayBufferToBase64(new Uint8Array(encryptedData)),
                     initializationVector: arrayBufferToBase64(new Uint8Array(iv)),
                     authenticationTag: arrayBufferToBase64(new Uint8Array(authTag)),

@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --experimental-strip-types --test --test-isolation=none tests/*.test.ts"
   },
   "dependencies": {
     "@types/react-router-dom": "^5.3.3",

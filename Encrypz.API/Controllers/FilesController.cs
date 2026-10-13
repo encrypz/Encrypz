@@ -1,197 +1,80 @@
-using Microsoft.AspNetCore.Authorization;
-using System.Security.Claims;
+using Encrypz.API.Services;
 using Encrypz.Core.DTOs;
-using Encrypz.Core.Entities;
-using Encrypz.Infrastructure.Data;
-using Encrypz.Infrastructure.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using System;
-using System.Linq;
-using System.Threading.Tasks;
 
-namespace Encrypz.API.Controllers
+namespace Encrypz.API.Controllers;
+
+[ApiController, Authorize, Route("api/[controller]")]
+public class FilesController(VaultRepository vault) : ControllerBase
 {
-    [Authorize]
-    [ApiController]
-    [Route("api/[controller]")]
-    public class FilesController : ControllerBase
+    private Guid Owner => VaultRepository.UserId(User);
+    private async Task<VaultRecord<VaultFile>?> Find(Guid id) => (await vault.List<VaultFile>("file")).SingleOrDefault(f => f.Value.Id == id);
+    [HttpPost, RequestSizeLimit(100_000_000)]
+    public async Task<IActionResult> Upload(FileUploadDto dto)
     {
-        private Guid CurrentUserId => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-        private readonly ApplicationDbContext _context;
-        private readonly IGoogleDriveService _googleDriveService;
-
-        public FilesController(ApplicationDbContext context, IGoogleDriveService googleDriveService)
+        if (dto.UserId != Owner || (dto.GoogleAccountId.HasValue && dto.GoogleAccountId != Owner)) return Forbid();
+        if (await vault.Config() == null) return Conflict("Create your vault first.");
+        if (dto.FolderId.HasValue && !(await vault.List<VaultFolder>("folder")).Any(f => f.Value.Id == dto.FolderId && !f.Value.IsDeleted))
+            return BadRequest("Invalid parent folder.");
+        try
         {
-            _context = context;
-            _googleDriveService = googleDriveService;
+            if (Convert.FromBase64String(dto.InitializationVector).Length != 12 || Convert.FromBase64String(dto.AuthenticationTag).Length != 16)
+                return BadRequest("Invalid encryption parameters.");
+            Convert.FromBase64String(dto.Payload);
         }
-
-        [HttpPost]
-        [DisableRequestSizeLimit]
-        public async Task<IActionResult> Upload([FromBody] FileUploadDto dto)
-        {
-            if (dto.UserId != CurrentUserId) return Forbid();
-            if (dto.FolderId.HasValue && !await _context.Folders.AnyAsync(
-                f => f.Id == dto.FolderId && f.UserId == CurrentUserId && !f.IsDeleted))
-                return BadRequest("Invalid parent folder.");
-            var user = await _context.Users.FindAsync(dto.UserId);
-            if (user == null) return NotFound("User not found.");
-            if (string.IsNullOrEmpty(user.GoogleRefreshToken)) return BadRequest("Google Drive not connected.");
-
-            var fileBytes = Convert.FromBase64String(dto.Payload);
-            var driveFileId = await _googleDriveService.UploadFileAsync(user.GoogleRefreshToken, fileBytes, "encrypz_file_" + Guid.NewGuid().ToString());
-
-            var file = new EncryptedFile
-            {
-                Id = Guid.NewGuid(),
-                EncryptedFileName = Convert.FromBase64String(dto.EncryptedFileName),
-                GoogleDriveFileId = driveFileId,
-                InitializationVector = Convert.FromBase64String(dto.InitializationVector),
-                AuthenticationTag = Convert.FromBase64String(dto.AuthenticationTag),
-                FileSize = dto.FileSize,
-                UploadedAt = DateTime.UtcNow,
-                UserId = dto.UserId,
-                FolderId = dto.FolderId,
-                EncryptedThumbnail = string.IsNullOrEmpty(dto.EncryptedThumbnail) ? null : Convert.FromBase64String(dto.EncryptedThumbnail),
-                ThumbnailIv = string.IsNullOrEmpty(dto.ThumbnailIv) ? null : Convert.FromBase64String(dto.ThumbnailIv),
-                ThumbnailAuthTag = string.IsNullOrEmpty(dto.ThumbnailAuthTag) ? null : Convert.FromBase64String(dto.ThumbnailAuthTag)
-            };
-
-            _context.EncryptedFiles.Add(file);
-            await _context.SaveChangesAsync();
-
-            return Ok(new { file.Id });
-        }
-
-        [HttpGet("user/{userId}")]
-        public async Task<IActionResult> ListFiles(Guid userId, [FromQuery] Guid? folderId)
-        {
-            if (userId != CurrentUserId) return Forbid();
-            var query = _context.EncryptedFiles.Where(f => f.UserId == userId && !f.IsDeleted);
-
-            if (folderId.HasValue)
-            {
-                query = query.Where(f => f.FolderId == folderId.Value);
-            }
-            else
-            {
-                query = query.Where(f => f.FolderId == null);
-            }
-
-            var records = await query.ToListAsync();
-            var files = records
-                .Select(f => new FileListDto
-                {
-                    Id = f.Id,
-                    EncryptedFileName = Convert.ToBase64String(f.EncryptedFileName),
-                FileSize = f.FileSize,
-                UploadedAt = f.UploadedAt,
-                    FolderId = f.FolderId,
-                    EncryptedThumbnail = f.EncryptedThumbnail != null ? Convert.ToBase64String(f.EncryptedThumbnail) : null,
-                    ThumbnailIv = f.ThumbnailIv != null ? Convert.ToBase64String(f.ThumbnailIv) : null,
-                    ThumbnailAuthTag = f.ThumbnailAuthTag != null ? Convert.ToBase64String(f.ThumbnailAuthTag) : null
-                })
-                .ToList();
-
-            return Ok(files);
-        }
-
-        [HttpGet("{id}")]
-        public async Task<IActionResult> DownloadFile(Guid id)
-        {
-            var file = await _context.EncryptedFiles.FirstOrDefaultAsync(f => f.Id == id);
-            if (file == null || file.UserId != CurrentUserId) return NotFound("File not found.");
-            var user = await _context.Users.FindAsync(file.UserId);
-            if (string.IsNullOrEmpty(user?.GoogleRefreshToken)) return BadRequest("Google Drive not connected.");
-
-            var fileBytes = await _googleDriveService.DownloadFileAsync(user.GoogleRefreshToken, file.GoogleDriveFileId);
-
-            var dto = new FileDownloadDto
-            
-            {
-                Id = file.Id,
-                EncryptedFileName = Convert.ToBase64String(file.EncryptedFileName),
-                Payload = Convert.ToBase64String(fileBytes),
-                InitializationVector = Convert.ToBase64String(file.InitializationVector),
-                AuthenticationTag = Convert.ToBase64String(file.AuthenticationTag)
-            };
-
-            return Ok(dto);
-        }
-
-        [HttpGet("deleted/{userId}")]
-        public async Task<IActionResult> GetDeletedFiles(Guid userId)
-        {
-            if (userId != CurrentUserId) return Forbid();
-            var records = await _context.EncryptedFiles
-                .Where(f => f.UserId == userId && f.IsDeleted).ToListAsync();
-            var files = records
-                .Select(f => new FileListDto
-                {
-                    Id = f.Id,
-                    EncryptedFileName = Convert.ToBase64String(f.EncryptedFileName),
-                FileSize = f.FileSize,
-                UploadedAt = f.UploadedAt,
-                    FolderId = f.FolderId,
-                    EncryptedThumbnail = f.EncryptedThumbnail != null ? Convert.ToBase64String(f.EncryptedThumbnail) : null,
-                    ThumbnailIv = f.ThumbnailIv != null ? Convert.ToBase64String(f.ThumbnailIv) : null,
-                    ThumbnailAuthTag = f.ThumbnailAuthTag != null ? Convert.ToBase64String(f.ThumbnailAuthTag) : null
-                })
-                .ToList();
-
-            return Ok(files);
-        }
-
-        [HttpPost("{id}/restore")]
-        public async Task<IActionResult> RestoreFile(Guid id)
-        {
-            var file = await _context.EncryptedFiles.FindAsync(id);
-            if (file == null || file.UserId != CurrentUserId) return NotFound("File not found.");
-            
-            file.IsDeleted = false;
-            file.DeletedAt = null;
-            await _context.SaveChangesAsync();
-
-            return Ok();
-        }
-
-        [HttpDelete("{id}")]
-        public async Task<IActionResult> DeleteFile(Guid id) // Soft delete
-        {
-            var file = await _context.EncryptedFiles.FindAsync(id);
-            if (file == null || file.UserId != CurrentUserId) return NotFound("File not found.");
-
-            file.IsDeleted = true;
-            file.DeletedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
-
-            return NoContent();
-        }
-
-        [HttpDelete("{id}/permanent")]
-        public async Task<IActionResult> PermanentDeleteFile(Guid id)
-        {
-            var file = await _context.EncryptedFiles.FirstOrDefaultAsync(f => f.Id == id);
-            if (file == null || file.UserId != CurrentUserId) return NotFound("File not found.");
-
-            var user = await _context.Users.FindAsync(file.UserId);
-            if (!string.IsNullOrEmpty(file.GoogleDriveFileId) && !string.IsNullOrEmpty(user?.GoogleRefreshToken))
-            {
-                try
-                {
-                    await _googleDriveService.DeleteFileAsync(user.GoogleRefreshToken, file.GoogleDriveFileId);
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Failed to delete file from Google Drive: {ex.Message}");
-                }
-            }
-
-            _context.EncryptedFiles.Remove(file);
-            await _context.SaveChangesAsync();
-
-            return NoContent();
-        }
+        catch (FormatException) { return BadRequest("Invalid encrypted data."); }
+        var file = new VaultFile { UserId = Owner, FolderId = dto.FolderId, EncryptedFileName = dto.EncryptedFileName,
+            FileSize = dto.FileSize, UploadedAt = DateTime.UtcNow, InitializationVector = dto.InitializationVector,
+            AuthenticationTag = dto.AuthenticationTag, EncryptedThumbnail = dto.EncryptedThumbnail,
+            ThumbnailIv = dto.ThumbnailIv, ThumbnailAuthTag = dto.ThumbnailAuthTag };
+        file.BlobId = await vault.Create("blob", dto.Payload);
+        // If metadata creation fails, retain the encrypted blob for recovery rather than risking data loss.
+        await vault.Create("file", file);
+        return Ok(new { file.Id });
+    }
+    [HttpGet("user/{userId:guid}")]
+    public async Task<IActionResult> ListFiles(Guid userId, Guid? folderId)
+    {
+        if (userId != Owner) return Forbid();
+        var folders = (await vault.List<VaultFolder>("folder")).Where(f => !f.Value.IsDeleted).Select(f => f.Value.Id).ToHashSet();
+        var files = (await vault.List<VaultFile>("file")).Select(f => f.Value).Where(f => !f.IsDeleted);
+        // Orphaned files are visible at root even if a folder was removed on another device.
+        return Ok(files.Where(f => folderId.HasValue ? f.FolderId == folderId : !f.FolderId.HasValue || !folders.Contains(f.FolderId.Value)));
+    }
+    [HttpGet("deleted/{userId:guid}")]
+    public async Task<IActionResult> Deleted(Guid userId) => userId != Owner ? Forbid() :
+        Ok((await vault.List<VaultFile>("file")).Select(f => f.Value).Where(f => f.IsDeleted));
+    [HttpGet("{id:guid}"), HttpGet("{id:guid}/download")]
+    public async Task<IActionResult> Download(Guid id)
+    {
+        var record = await Find(id);
+        if (record == null) return NotFound();
+        var file = record.Value;
+        return Ok(new FileDownloadDto { Id = file.Id, EncryptedFileName = file.EncryptedFileName,
+            Payload = await vault.ReadBlob(file.BlobId), InitializationVector = file.InitializationVector, AuthenticationTag = file.AuthenticationTag });
+    }
+    [HttpDelete("{id:guid}")]
+    public Task<IActionResult> Trash(Guid id) => SetDeleted(id, true);
+    [HttpPost("{id:guid}/restore")]
+    public Task<IActionResult> Restore(Guid id) => SetDeleted(id, false);
+    private async Task<IActionResult> SetDeleted(Guid id, bool deleted)
+    {
+        var record = await Find(id);
+        if (record == null) return NotFound();
+        record.Value.IsDeleted = deleted;
+        record.Value.DeletedAt = deleted ? DateTime.UtcNow : null;
+        await vault.Update("file", record);
+        return NoContent();
+    }
+    [HttpDelete("{id:guid}/permanent")]
+    public async Task<IActionResult> Delete(Guid id)
+    {
+        var record = await Find(id);
+        if (record == null) return NotFound();
+        if (!record.Value.IsDeleted) return Conflict("Move the file to the recycle bin first.");
+        await vault.Delete("blob", record.Value.BlobId);
+        await vault.Delete("file", record.DriveId);
+        return NoContent();
     }
 }

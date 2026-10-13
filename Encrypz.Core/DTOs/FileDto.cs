@@ -20,22 +20,6 @@ namespace Encrypz.Core.DTOs
         public Guid? GoogleAccountId { get; set; }
     }
 
-    public class FileListDto
-    {
-        public Guid Id { get; set; }
-        public string EncryptedFileName { get; set; } = string.Empty;
-        public long FileSize { get; set; }
-        public DateTime UploadedAt { get; set; }
-        public Guid? FolderId { get; set; }
-
-        public Guid? GoogleAccountId { get; set; }
-        public string? GoogleAccountEmail { get; set; }
-
-        public string? EncryptedThumbnail { get; set; }
-        public string? ThumbnailIv { get; set; }
-        public string? ThumbnailAuthTag { get; set; }
-    }
-
     public class FileDownloadDto
     {
         public Guid Id { get; set; }

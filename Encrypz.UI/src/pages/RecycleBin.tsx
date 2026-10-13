@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 
 import axios from 'axios';
-import { 
-    deriveKey, 
-    decryptData, 
-    base64ToArrayBuffer, 
+import {
+    getVaultKey,
+    decryptName,
+    decryptData,
+    base64ToArrayBuffer,
     uint8ArrayToString
 } from '../utils/crypto';
 
@@ -26,23 +27,23 @@ interface FolderItem {
 }
 
 export const RecycleBin = () => {
-    
+
     const userId = sessionStorage.getItem('userId');
-    const masterPassword = sessionStorage.getItem('masterPassword');
-    const username = sessionStorage.getItem('username'); 
+    const vaultKey = getVaultKey();
+    const username = sessionStorage.getItem('username');
 
     const [files, setFiles] = useState<FileItem[]>([]);
     const [folders, setFolders] = useState<FolderItem[]>([]);
     const [decryptedNames, setDecryptedNames] = useState<Record<string, string>>({});
     const [decryptedThumbnails, setDecryptedThumbnails] = useState<Record<string, string>>({});
     const [loading, setLoading] = useState(false);
-    
+
     useEffect(() => {
         document.title = "Encrypz - Recycle Bin";
     }, []);
 
     useEffect(() => {
-        if (userId && masterPassword && username) {
+        if (userId && vaultKey && username) {
             fetchContents();
         }
     }, [userId]);
@@ -68,15 +69,14 @@ export const RecycleBin = () => {
     };
 
     const decryptNames = async (fileList: FileItem[], folderList: FolderItem[]) => {
-        if (!masterPassword || !username) return;
+        if (!vaultKey || !username) return;
         const names: Record<string, string> = {};
         const thumbnails: Record<string, string> = {};
-        const key = await deriveKey(masterPassword, username);
+        const key = vaultKey!;
 
         for (const file of fileList) {
             try {
-                const fileNameBytes = base64ToArrayBuffer(file.encryptedFileName);
-                names[file.id] = uint8ArrayToString(fileNameBytes);
+                names[file.id] = await decryptName(file.encryptedFileName, key);
             } catch {
                 names[file.id] = `Encrypted File (${file.id.substring(0, 8)})`;
             }
@@ -170,9 +170,9 @@ export const RecycleBin = () => {
                     </h2>
                     {loading && <span style={{ color: 'var(--primary)', fontSize: '0.85rem', animation: 'pulse 1.5s infinite' }}>Loading...</span>}
                 </div>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginTop: '8px' }}>Items here will be permanently deleted automatically after 1 hour.</p>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginTop: '8px' }}>Items remain here until you permanently delete them.</p>
             </div>
-            
+
             {files.length === 0 && folders.length === 0 ? (
                 <div className="text-center" style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', color: 'var(--text-muted)' }}>
                     <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" fill="rgba(255,255,255,0.1)" viewBox="0 0 16 16" style={{ margin: '0 auto 16px auto' }}>

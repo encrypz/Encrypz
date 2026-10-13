@@ -5,8 +5,6 @@ services:
       dockerfile: Encrypz.API.Dockerfile
     restart: unless-stopped
     environment:
-      MongoDB__ConnectionString: ${MongoDB__ConnectionString}
-      MongoDB__DatabaseName: ${MongoDB__DatabaseName:-Encrypz}
       Frontend__Url: ${FRONTEND_URL}
       Frontend__AllowedOrigins: ${FRONTEND_URL}
       GoogleDrive__ClientId: ${GOOGLE_CLIENT_ID}

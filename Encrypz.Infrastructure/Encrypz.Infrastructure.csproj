@@ -1,13 +1,8 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\Encrypz.Core\Encrypz.Core.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Google.Apis.Drive.v3" Version="1.75.0.4218" />
-    <PackageReference Include="MongoDB.EntityFrameworkCore" Version="8.3.0" />
   </ItemGroup>
 
   <ItemGroup>

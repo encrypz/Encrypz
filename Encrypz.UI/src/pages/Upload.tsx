@@ -2,11 +2,11 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { generateThumbnailBytes } from '../utils/media';
-import { 
-    deriveKey, 
-    encryptData, 
-    arrayBufferToBase64, 
-    stringToUint8Array 
+import {
+    getVaultKey,
+    encryptData,
+    arrayBufferToBase64,
+    encryptName
 } from '../utils/crypto';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
@@ -27,8 +27,7 @@ export const Upload = () => {
     const folderId = queryParams.get('folderId');
 
     const userId = sessionStorage.getItem('userId');
-    const masterPassword = sessionStorage.getItem('masterPassword');
-    const username = sessionStorage.getItem('username');
+    const vaultKey = getVaultKey();
 
     const [uploading, setUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState<{current: number, total: number} | null>(null);
@@ -48,26 +47,26 @@ export const Upload = () => {
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files || e.target.files.length === 0) return;
-        
+
         const files = Array.from(e.target.files);
         setUploading(true);
         setSuccessMessage(null);
         setUploadProgress({ current: 0, total: files.length });
 
         try {
-            const key = await deriveKey(masterPassword!, username!);
+            const key = vaultKey!;
             let successCount = 0;
-            
+
             for (let i = 0; i < files.length; i++) {
                 const file = files[i];
                 setUploadProgress({ current: i + 1, total: files.length });
-                
+
                 const arrayBuffer = await file.arrayBuffer();
                 const fileData = new Uint8Array(arrayBuffer);
-                
+
                 const encrypted = await encryptData(fileData, key);
-                
-                const fileNameB64 = arrayBufferToBase64(stringToUint8Array(file.name));
+
+                const fileNameB64 = await encryptName(file.name, key);
 
                 let encryptedThumbnail = null;
                 let thumbnailIv = null;
@@ -87,6 +86,7 @@ export const Upload = () => {
 
                 const payload = {
                     encryptedFileName: fileNameB64,
+                    fileSize: file.size,
                     payload: arrayBufferToBase64(encrypted.payload),
                     initializationVector: arrayBufferToBase64(encrypted.iv),
                     authenticationTag: arrayBufferToBase64(encrypted.authTag),
@@ -108,7 +108,7 @@ export const Upload = () => {
         } finally {
             setUploading(false);
             setUploadProgress(null);
-            e.target.value = ''; 
+            e.target.value = '';
         }
     };
 
@@ -165,11 +165,11 @@ export const Upload = () => {
                 )}
 
                 <div style={{ position: 'relative', display: 'inline-block', width: '100%', maxWidth: '300px' }}>
-                    <input 
-                        type="file" 
+                    <input
+                        type="file"
                         multiple
-                        onChange={handleFileUpload} 
-                        disabled={uploading} 
+                        onChange={handleFileUpload}
+                        disabled={uploading}
                         style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
                     />
                     <button className="btn btn-primary" style={{ pointerEvents: 'none', width: '100%', padding: '16px', fontSize: '1.1rem' }}>

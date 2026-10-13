@@ -1,11 +1,7 @@
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.RateLimiting;
-using MongoDB.Driver;
-using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.AspNetCore.DataProtection;
-using Encrypz.Infrastructure.Data;
 using Encrypz.Infrastructure.Services;
-using Microsoft.EntityFrameworkCore;
 using Encrypz.API.Services;
 using Microsoft.AspNetCore.HttpOverrides;
 
@@ -32,27 +28,11 @@ public class Program
             }
         });
 
-        builder.Services.AddSingleton<IMongoClient>(serviceProvider =>
-        {
-            var configuration = serviceProvider.GetRequiredService<IConfiguration>();
-            var connectionString = configuration["MongoDB:ConnectionString"]
-                ?? throw new InvalidOperationException("Configure MongoDB__ConnectionString.");
-            if (connectionString.Contains("<db_username>", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("Replace the MongoDB database username placeholder in private configuration.");
-            var settings = MongoClientSettings.FromConnectionString(connectionString);
-            settings.ServerSelectionTimeout = TimeSpan.FromSeconds(15);
-            return new MongoClient(settings);
-        });
-        builder.Services.AddSingleton(serviceProvider =>
-            serviceProvider.GetRequiredService<IMongoClient>().GetDatabase(
-                serviceProvider.GetRequiredService<IConfiguration>()["MongoDB:DatabaseName"] ?? "Encrypz"));
-        builder.Services.AddDbContext<ApplicationDbContext>((serviceProvider, options) =>
-            options.UseMongoDB(serviceProvider.GetRequiredService<IMongoClient>(),
-                serviceProvider.GetRequiredService<IConfiguration>()["MongoDB:DatabaseName"] ?? "Encrypz"));
-        builder.Services.AddDataProtection().SetApplicationName("Encrypz");
-        builder.Services.AddSingleton<MongoXmlRepository>();
-        builder.Services.AddOptions<KeyManagementOptions>()
-            .Configure<MongoXmlRepository>((options, repository) => options.XmlRepository = repository);
+        // Temporary sessions intentionally expire on application restart.
+        builder.Services.AddDataProtection().UseEphemeralDataProtectionProvider();
+        builder.Services.AddHttpClient<IDriveVaultStore, DriveVaultStore>();
+        builder.Services.AddHttpContextAccessor();
+        builder.Services.AddScoped<VaultRepository>();
         builder.Services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -68,10 +48,6 @@ public class Program
         builder.Services.AddEndpointsApiExplorer();
         builder.Services.AddSwaggerGen();
         
-        builder.Services.AddScoped<IGoogleDriveService, GoogleDriveService>();
-        if (builder.Configuration.GetValue("RecycleBin:CleanupEnabled", !builder.Environment.IsDevelopment()))
-            builder.Services.AddHostedService<RecycleBinCleanupService>();
-
         var allowedOrigins = builder.Configuration["Frontend:AllowedOrigins"]
             ?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             ?? new[] { "http://localhost:5173", "http://localhost:5174" };
@@ -88,14 +64,6 @@ public class Program
         });
 
         var app = builder.Build();
-
-        if (args.Contains("--initialize-db"))
-        {
-            using var scope = app.Services.CreateScope();
-            MongoDatabaseSetup.InitializeAsync(scope.ServiceProvider.GetRequiredService<IMongoDatabase>())
-                .GetAwaiter().GetResult();
-            return;
-        }
 
         app.UseForwardedHeaders();
         // Configure the HTTP request pipeline.
@@ -129,6 +97,23 @@ public class Program
                 }
             }
             await next();
+        });
+        app.Use(async (context, next) =>
+        {
+            try { await next(); }
+            catch (HttpRequestException e)
+            {
+                context.Response.StatusCode = e.StatusCode == System.Net.HttpStatusCode.Unauthorized ? 401
+                    : e.StatusCode == System.Net.HttpStatusCode.NotFound ? 404 : 502;
+                context.Response.ContentType = "application/json";
+                await System.Text.Json.JsonSerializer.SerializeAsync(context.Response.Body, new { message = "Google Drive is unavailable or access has expired. Sign in again or retry." });
+            }
+            catch (InvalidDataException e)
+            {
+                context.Response.StatusCode = 409;
+                context.Response.ContentType = "application/json";
+                await System.Text.Json.JsonSerializer.SerializeAsync(context.Response.Body, new { message = e.Message });
+            }
         });
         app.UseAuthorization();
         app.UseDefaultFiles();

@@ -1,311 +1,234 @@
-using System.Net.Http.Json;
-using System.Text.Json;
-using Microsoft.AspNetCore.Identity;
-using Encrypz.Core.Entities;
-using Microsoft.AspNetCore.DataProtection;
-using Microsoft.AspNetCore.DataProtection.KeyManagement;
-using Microsoft.Extensions.Options;
 using System.Net;
+using System.Net.Http.Json;
 using System.Text;
-using Microsoft.AspNetCore.Authentication.Google;
+using System.Text.Json;
 using Encrypz.API;
 using Encrypz.API.Services;
-using Encrypz.Infrastructure.Data;
+using Encrypz.Infrastructure.Services;
+using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.WebUtilities;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Hosting;
 using Xunit;
 
 namespace Encrypz.Tests;
 
 public class SignInFlowTests
 {
-    [Fact]
-    public async Task GoogleChallengeUsesProtectedStatePkceAndConfiguredCallback()
+    private static readonly VaultConfig Config = new() { Version = 2, Iterations = 600000,
+        Salt = Convert.ToBase64String(new byte[32]), Iv = Convert.ToBase64String(new byte[12]), WrappedKey = Convert.ToBase64String(new byte[48]) };
+    private static HttpClient Client(TestApplication app)
     {
-        await using var factory = new TestApplication();
-        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
-            { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
+        var client = app.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
+        client.DefaultRequestHeaders.Add("Origin", "https://localhost");
+        return client;
+    }
+    private static async Task<JsonElement> Login(HttpClient client)
+    {
         var response = await client.GetAsync("/api/Auth/google-login");
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
-        var url = response.Headers.Location!;
-        Assert.Equal("accounts.google.com", url.Host);
-        var query = QueryHelpers.ParseQuery(url.Query);
-        Assert.Equal("test-client", query["client_id"]);
-        Assert.Equal("https://localhost/api/Auth/google-callback", query["redirect_uri"]);
+        var query = QueryHelpers.ParseQuery(response.Headers.Location!.Query);
         Assert.Equal("S256", query["code_challenge_method"]);
-        Assert.False(string.IsNullOrEmpty(query["code_challenge"]));
-        Assert.False(string.IsNullOrEmpty(query["state"]));
-        Assert.Equal("offline", query["access_type"]);
-        Assert.Contains("drive.file", query["scope"].ToString());
-        Assert.Contains(response.Headers.GetValues("Set-Cookie"), cookie => cookie.Contains(".AspNetCore.Correlation."));
+        Assert.Contains("drive.appdata", query["scope"].ToString());
+        var callback = await client.GetAsync(QueryHelpers.AddQueryString("/api/Auth/google-callback?code=test", "state", query["state"].ToString()));
+        Assert.Equal(HttpStatusCode.Redirect, callback.StatusCode);
+        var session = await client.GetAsync("/api/Auth/session");
+        var body = await session.Content.ReadAsStringAsync();
+        Assert.True(session.IsSuccessStatusCode, body);
+        return JsonDocument.Parse(body).RootElement;
     }
-
     [Theory]
     [InlineData("/api/Auth/session")]
     [InlineData("/api/Files/user/00000000-0000-0000-0000-000000000001")]
     [InlineData("/api/Folders/user/00000000-0000-0000-0000-000000000001")]
-    public async Task ProtectedEndpointsRejectAnonymousRequests(string path)
+    public async Task AnonymousCannotReadVault(string url)
     {
-        await using var factory = new TestApplication();
-        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
-            { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync(path)).StatusCode);
+        await using var app = new TestApplication(); using var client = Client(app);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync(url)).StatusCode);
     }
-
     [Fact]
-    public async Task InvalidCallbackStateCannotCreateSession()
+    public async Task DatabaseFreeGoogleSessionContainsNoTokensAndLogoutRevokesCookie()
     {
-        await using var factory = new TestApplication();
-        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
-            { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
-        var response = await client.GetAsync("/api/Auth/google-callback?code=invalid&state=forged");
-        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
-        Assert.Contains("error=google_signin_failed", response.Headers.Location!.ToString());
+        await using var app = new TestApplication(); using var client = Client(app);
+        var session = await Login(client);
+        Assert.False(session.GetProperty("hasMasterPassword").GetBoolean());
+        Assert.DoesNotContain("token-", session.GetRawText());
+        var cookies = (await client.GetAsync("/api/Auth/session")).Headers.ToString();
+        Assert.DoesNotContain("token-", cookies);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync("/api/Auth/logout", null)).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/Auth/session")).StatusCode);
     }
-
+    [Fact]
+    public async Task NewDeviceFindsSameEncryptedConfigAndFilesWithoutPasswordEndpoint()
+    {
+        await using var app = new TestApplication(); using var first = Client(app);
+        var session = await Login(first); var id = session.GetProperty("userId").GetString();
+        Assert.Equal(HttpStatusCode.NoContent, (await first.PostAsJsonAsync("/api/Auth/vault-config", Config)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await first.PostAsJsonAsync("/api/Auth/vault-config", Config)).StatusCode);
+        var upload = await first.PostAsJsonAsync("/api/Files", Upload(id!));
+        Assert.Equal(HttpStatusCode.OK, upload.StatusCode);
+        using var second = Client(app);
+        var restored = await Login(second);
+        Assert.Equal(id, restored.GetProperty("userId").GetString());
+        Assert.Equal(Config.WrappedKey, restored.GetProperty("vaultConfig").GetProperty("wrappedKey").GetString());
+        var files = JsonDocument.Parse(await second.GetStringAsync($"/api/Files/user/{id}")).RootElement;
+        Assert.Equal(1, files.GetArrayLength());
+        var fileId = files[0].GetProperty("id").GetString();
+        var download = JsonDocument.Parse(await second.GetStringAsync($"/api/Files/{fileId}/download")).RootElement;
+        Assert.Equal("AQID", download.GetProperty("payload").GetString());
+        var removed = await second.PostAsJsonAsync("/api/Auth/unlock", new { password = "never send this" });
+        Assert.True(removed.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed);
+    }
+    [Fact]
+    public async Task GoogleAccountsAreIsolatedAndSpoofedOwnersAreRejected()
+    {
+        await using var app = new TestApplication(); using var first = Client(app);
+        var a = await Login(first); var id = a.GetProperty("userId").GetString()!;
+        await first.PostAsJsonAsync("/api/Auth/vault-config", Config);
+        var uploaded = JsonDocument.Parse(await (await first.PostAsJsonAsync("/api/Files", Upload(id))).Content.ReadAsStringAsync()).RootElement;
+        app.Backchannel.Subject = "other";
+        using var second = Client(app); var b = await Login(second);
+        Assert.False(b.GetProperty("hasMasterPassword").GetBoolean());
+        Assert.Equal(HttpStatusCode.Forbidden, (await second.GetAsync($"/api/Files/user/{id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await second.PostAsJsonAsync("/api/Files", Upload(id))).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await second.GetAsync($"/api/Files/{uploaded.GetProperty("id").GetString()}/download")).StatusCode);
+    }
+    [Fact]
+    public async Task RecycleBinRestoresAndDeletesFiles()
+    {
+        await using var app = new TestApplication(); using var client = Client(app);
+        var session = await Login(client); var owner = session.GetProperty("userId").GetString()!;
+        await client.PostAsJsonAsync("/api/Auth/vault-config", Config);
+        var file = JsonDocument.Parse(await (await client.PostAsJsonAsync("/api/Files", Upload(owner))).Content.ReadAsStringAsync()).RootElement.GetProperty("id").GetString();
+        Assert.Equal(HttpStatusCode.Conflict, (await client.DeleteAsync($"/api/Files/{file}/permanent")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/Files/{file}")).StatusCode);
+        Assert.Equal(1, JsonDocument.Parse(await client.GetStringAsync($"/api/Files/deleted/{owner}")).RootElement.GetArrayLength());
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync($"/api/Files/{file}/restore", null)).StatusCode);
+        await client.DeleteAsync($"/api/Files/{file}");
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/Files/{file}/permanent")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/Files/{file}")).StatusCode);
+    }
+    [Fact]
+    public async Task DamagedDuplicateOrMissingConfigNeverBecomesNewVault()
+    {
+        await using var app = new TestApplication(); using var client = Client(app);
+        await Login(client);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/Auth/vault-config", new { version = 2 })).StatusCode);
+        await app.Store.CreateAsync("token-owner", "file", "{}"u8.ToArray());
+        Assert.Equal(HttpStatusCode.Conflict, (await client.GetAsync("/api/Auth/session")).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/Auth/vault-config", Config)).StatusCode);
+        await app.Store.CreateAsync("token-owner", "config", JsonSerializer.SerializeToUtf8Bytes(Config, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        await app.Store.CreateAsync("token-owner", "config", JsonSerializer.SerializeToUtf8Bytes(Config, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        Assert.Equal(HttpStatusCode.Conflict, (await client.GetAsync("/api/Auth/session")).StatusCode);
+    }
+    [Fact]
+    public async Task RecoveryRestoresOnlyMissingConfigAndNeverOverwritesAnExistingKey()
+    {
+        await using var app = new TestApplication(); using var client = Client(app);
+        await Login(client);
+        await app.Store.CreateAsync("token-owner", "file", "{}"u8.ToArray());
+        var missing = await client.GetAsync("/api/Auth/session");
+        Assert.Equal(HttpStatusCode.Conflict, missing.StatusCode);
+        Assert.True(JsonDocument.Parse(await missing.Content.ReadAsStringAsync()).RootElement.GetProperty("recoveryRequired").GetBoolean());
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsJsonAsync("/api/Auth/vault-config/recover", Config)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/Auth/session")).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/Auth/vault-config/recover", Config)).StatusCode);
+    }
+    [Fact]
+    public async Task FolderHierarchyAndRecycleBinSurviveNewSessions()
+    {
+        await using var app = new TestApplication(); using var client = Client(app);
+        var session = await Login(client); var owner = session.GetProperty("userId").GetString()!;
+        await client.PostAsJsonAsync("/api/Auth/vault-config", Config);
+        object Folder(string? parent) => new { userId = owner, parentFolderId = parent, encryptedFolderName = "AQID",
+            initializationVector = Convert.ToBase64String(new byte[12]), authenticationTag = Convert.ToBase64String(new byte[16]) };
+        var parent = JsonDocument.Parse(await (await client.PostAsJsonAsync("/api/Folders", Folder(null))).Content.ReadAsStringAsync()).RootElement.GetProperty("id").GetString()!;
+        var child = JsonDocument.Parse(await (await client.PostAsJsonAsync("/api/Folders", Folder(parent))).Content.ReadAsStringAsync()).RootElement.GetProperty("id").GetString()!;
+        Assert.Equal(HttpStatusCode.Conflict, (await client.DeleteAsync($"/api/Folders/{parent}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/Folders/{child}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/Folders/{parent}")).StatusCode);
+        using var second = Client(app); await Login(second);
+        Assert.Equal(2, JsonDocument.Parse(await second.GetStringAsync($"/api/Folders/deleted/{owner}")).RootElement.GetArrayLength());
+        Assert.Equal(HttpStatusCode.Conflict, (await second.DeleteAsync($"/api/Folders/{parent}/permanent")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await second.PostAsync($"/api/Folders/{child}/restore", null)).StatusCode);
+        // Restoring a child whose parent is trashed makes it visible at root.
+        Assert.Equal(1, JsonDocument.Parse(await second.GetStringAsync($"/api/Folders/user/{owner}")).RootElement.GetArrayLength());
+    }
     [Theory]
     [InlineData(null)]
     [InlineData("https://attacker.example")]
-    public async Task BrowserWritesRejectMissingOrForeignOrigin(string? origin)
+    public async Task ForeignOriginCannotWrite(string? origin)
     {
-        await using var factory = new TestApplication();
-        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
-            { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/Auth/logout");
-        if (origin != null) request.Headers.Add("Origin", origin);
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(request)).StatusCode);
+        await using var app = new TestApplication(); using var client = Client(app);
+        client.DefaultRequestHeaders.Remove("Origin");
+        if (origin != null) client.DefaultRequestHeaders.Add("Origin", origin);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsync("/api/Auth/logout", null)).StatusCode);
     }
-
     [Fact]
-    public async Task SuccessfulGoogleCallbackCreatesSessionAndLogoutClearsIt()
+    public async Task ForgedOAuthStateCannotSignIn()
     {
-        await using var factory = new TestApplication();
-        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
-            { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
-        var challenge = await client.GetAsync("/api/Auth/google-login");
-        var state = QueryHelpers.ParseQuery(challenge.Headers.Location!.Query)["state"].ToString();
-        var callback = await client.GetAsync(QueryHelpers.AddQueryString(
-            "/api/Auth/google-callback?code=test-code", "state", state));
-        Assert.Equal(HttpStatusCode.Redirect, callback.StatusCode);
-        Assert.Equal("https://localhost/login?google=success", callback.Headers.Location!.ToString());
-        var session = await client.GetAsync("/api/Auth/session");
-        Assert.Equal(HttpStatusCode.OK, session.StatusCode);
-        var body = await session.Content.ReadAsStringAsync();
-        Assert.Contains("owner@example.com", body);
-        Assert.Contains("\"isGoogleDriveConnected\":true", body);
-        Assert.DoesNotContain("test-refresh", body);
-        using var logout = new HttpRequestMessage(HttpMethod.Post, "/api/Auth/logout");
-        logout.Headers.Add("Origin", "https://localhost");
-        Assert.Equal(HttpStatusCode.NoContent, (await client.SendAsync(logout)).StatusCode);
+        await using var app = new TestApplication(); using var client = Client(app);
+        var response = await client.GetAsync("/api/Auth/google-callback?code=x&state=forged");
+        Assert.Contains("error=google_signin_failed", response.Headers.Location!.ToString());
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/Auth/session")).StatusCode);
     }
+    private static object Upload(string owner) => new { userId = owner, encryptedFileName = "encrypted-name", payload = "AQID",
+        initializationVector = Convert.ToBase64String(new byte[12]), authenticationTag = Convert.ToBase64String(new byte[16]) };
 
-    [Fact]
-    public async Task PasswordAccountHashesPasswordAndSupportsCaseInsensitiveLogin()
+    internal sealed class FakeDrive : IDriveVaultStore
     {
-        await using var factory = new TestApplication();
-        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
-            { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
-        client.DefaultRequestHeaders.Add("Origin", "https://localhost");
-        const string password = "my strong account password";
-        var registered = await client.PostAsJsonAsync("/api/Auth/register", new { username = "VaultOwner", password });
-        Assert.Equal(HttpStatusCode.OK, registered.StatusCode);
-        var body = await registered.Content.ReadAsStringAsync();
-        Assert.DoesNotContain(password, body);
-        Assert.DoesNotContain("passwordHash", body);
-        using (var scope = factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            var user = await db.Users.SingleAsync();
-            Assert.NotEqual(password, user.PasswordHash);
-            Assert.Equal(PasswordVerificationResult.Success,
-                new PasswordHasher<User>().VerifyHashedPassword(user, user.PasswordHash!, password));
-        }
-        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/api/Auth/register",
-            new { username = "vaultowner", password })).StatusCode);
-        await client.PostAsync("/api/Auth/logout", null);
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsJsonAsync("/api/Auth/login",
-            new { username = "VaultOwner", password = "wrong account password" })).StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/Auth/session")).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/Auth/login",
-            new { username = "vaultowner", password })).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/Auth/session")).StatusCode);
+        private readonly Dictionary<(string Token, string Id), (string Kind, byte[] Bytes)> data = new();
+        public Task<IReadOnlyList<DriveDocument>> ListAsync(string token, string kind) => Task.FromResult<IReadOnlyList<DriveDocument>>(
+            data.Where(e => e.Key.Token == token && e.Value.Kind == kind).Select(e => new DriveDocument(e.Key.Id, kind, e.Value.Bytes.ToArray())).ToList());
+        public Task<DriveDocument?> ReadAsync(string token, string id, string kind) => Task.FromResult(
+            data.TryGetValue((token, id), out var entry) && entry.Kind == kind ? new DriveDocument(id, kind, entry.Bytes.ToArray()) : null);
+        public Task<string> CreateAsync(string token, string kind, byte[] content)
+        { var id = Guid.NewGuid().ToString(); data.Add((token, id), (kind, content.ToArray())); return Task.FromResult(id); }
+        public Task UpdateAsync(string token, string id, string kind, byte[] content)
+        { if (!data.ContainsKey((token,id))) throw new Exception("Missing record"); data[(token,id)] = (kind,content.ToArray()); return Task.CompletedTask; }
+        public Task DeleteAsync(string token, string id, string kind) { data.Remove((token,id)); return Task.CompletedTask; }
     }
-
-    [Theory]
-    [InlineData("ab", "long enough password")]
-    [InlineData("invalid user", "long enough password")]
-    [InlineData("validuser", "short")]
-    public async Task RegistrationRejectsInvalidCredentials(string username, string password)
+    internal sealed class GoogleBackchannel : HttpMessageHandler
     {
-        await using var factory = new TestApplication();
-        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
-            { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
-        client.DefaultRequestHeaders.Add("Origin", "https://localhost");
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/Auth/register", new { username, password })).StatusCode);
-    }
-
-    [Fact]
-    public async Task ConnectingGooglePreservesPasswordAccountsIdAndUsername()
-    {
-        await using var factory = new TestApplication();
-        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
-            { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
-        client.DefaultRequestHeaders.Add("Origin", "https://localhost");
-        var registered = await client.PostAsJsonAsync("/api/Auth/register", new { username = "MyVault", password = "long enough account password" });
-        var before = JsonDocument.Parse(await registered.Content.ReadAsStringAsync()).RootElement;
-        var challenge = await client.GetAsync("/api/Auth/google-connect");
-        Assert.Equal(HttpStatusCode.Redirect, challenge.StatusCode);
-        var state = QueryHelpers.ParseQuery(challenge.Headers.Location!.Query)["state"].ToString();
-        var callback = await client.GetAsync(QueryHelpers.AddQueryString("/api/Auth/google-callback?code=test-code", "state", state));
-        Assert.Equal("https://localhost/login?google=success", callback.Headers.Location!.ToString());
-        var after = JsonDocument.Parse(await client.GetStringAsync("/api/Auth/session")).RootElement;
-        Assert.Equal(before.GetProperty("userId").GetString(), after.GetProperty("userId").GetString());
-        Assert.Equal("MyVault", after.GetProperty("username").GetString());
-        Assert.True(after.GetProperty("isGoogleDriveConnected").GetBoolean());
-        using var scope = factory.Services.CreateScope();
-        Assert.Equal(1, await scope.ServiceProvider.GetRequiredService<ApplicationDbContext>().Users.CountAsync());
-    }
-
-    [Fact]
-    public async Task GoogleLinkingRejectsCallbackAfterLocalLogout()
-    {
-        await using var factory = new TestApplication();
-        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
-            { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
-        client.DefaultRequestHeaders.Add("Origin", "https://localhost");
-        await client.PostAsJsonAsync("/api/Auth/register", new { username = "MyVault", password = "long enough account password" });
-        var challenge = await client.GetAsync("/api/Auth/google-connect");
-        var state = QueryHelpers.ParseQuery(challenge.Headers.Location!.Query)["state"].ToString();
-        await client.PostAsync("/api/Auth/logout", null);
-        var callback = await client.GetAsync(QueryHelpers.AddQueryString("/api/Auth/google-callback?code=test-code", "state", state));
-        Assert.Contains("error=google_signin_failed", callback.Headers.Location!.ToString());
-        using var scope = factory.Services.CreateScope();
-        Assert.Null((await scope.ServiceProvider.GetRequiredService<ApplicationDbContext>().Users.SingleAsync()).GoogleSubject);
-    }
-
-    [Fact]
-    public async Task OneUserCanConnectMultipleGoogleAccountsAndFilesArePrivate()
-    {
-        await using var factory = new TestApplication();
-        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
-            { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
-        client.DefaultRequestHeaders.Add("Origin", "https://localhost");
-
-        // 1. Register an account
-        var regRes = await client.PostAsJsonAsync("/api/Auth/register", new { username = "SecretVaultOwner", password = "SecurePassword123!" });
-        Assert.Equal(HttpStatusCode.OK, regRes.StatusCode);
-        var regJson = JsonDocument.Parse(await regRes.Content.ReadAsStringAsync()).RootElement;
-        var userId = Guid.Parse(regJson.GetProperty("userId").GetString()!);
-
-        // 2. Connect 1st Google Account
-        GoogleBackchannel.CurrentSubject = "google-sub-1";
-        GoogleBackchannel.CurrentEmail = "user1@gmail.com";
-        var challenge1 = await client.GetAsync("/api/Auth/google-connect");
-        var state1 = QueryHelpers.ParseQuery(challenge1.Headers.Location!.Query)["state"].ToString();
-        var callback1 = await client.GetAsync(QueryHelpers.AddQueryString("/api/Auth/google-callback?code=code-1", "state", state1));
-        Assert.Equal(HttpStatusCode.Redirect, callback1.StatusCode);
-
-        // 3. Connect 2nd Google Account to the same Encrypz account
-        GoogleBackchannel.CurrentSubject = "google-sub-2";
-        GoogleBackchannel.CurrentEmail = "user2@company.com";
-        var challenge2 = await client.GetAsync("/api/Auth/google-connect");
-        var state2 = QueryHelpers.ParseQuery(challenge2.Headers.Location!.Query)["state"].ToString();
-        var callback2 = await client.GetAsync(QueryHelpers.AddQueryString("/api/Auth/google-callback?code=code-2", "state", state2));
-        Assert.Equal(HttpStatusCode.Redirect, callback2.StatusCode);
-
-        // 4. Verify Google accounts list returns 2 accounts for this user
-        var accountsRes = await client.GetAsync("/api/Auth/google-accounts");
-        Assert.Equal(HttpStatusCode.OK, accountsRes.StatusCode);
-        var accountsJson = JsonDocument.Parse(await accountsRes.Content.ReadAsStringAsync()).RootElement;
-        Assert.Equal(2, accountsJson.GetArrayLength());
-
-        // 5. Verify database has 2 ConnectedGoogleAccount entities for this user
-        using (var scope = factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            var connected = await db.GoogleAccounts.Where(g => g.UserId == userId).ToListAsync();
-            Assert.Equal(2, connected.Count);
-            Assert.Contains(connected, a => a.GoogleSubject == "google-sub-1");
-            Assert.Contains(connected, a => a.GoogleSubject == "google-sub-2");
-        }
-    }
-
-    private sealed class GoogleBackchannel : HttpMessageHandler
-    {
-        public static string CurrentSubject = "test-subject";
-        public static string CurrentEmail = "owner@example.com";
-
+        public string Subject = "owner";
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var json = request.RequestUri!.AbsolutePath.EndsWith("/token")
-                ? """{"access_token":"test-access","refresh_token":"test-refresh","token_type":"Bearer","expires_in":3600,"scope":"openid email profile https://www.googleapis.com/auth/drive.file"}"""
-                : $$"""{"sub":"{{CurrentSubject}}","email":"{{CurrentEmail}}","name":"Owner"}""";
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-                { Content = new StringContent(json, Encoding.UTF8, "application/json") });
+                ? $$"""{"access_token":"token-{{Subject}}","token_type":"Bearer","expires_in":3600,"scope":"openid email profile https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.file"}"""
+                : $$"""{"sub":"{{Subject}}","email":"{{Subject}}@example.com","name":"Owner"}""";
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") });
         }
     }
-
+    // The development machine runs .NET 10 with the .NET 8 TestHost package.
+    // Stream serialization avoids its incompatible PipeWriter implementation.
     private sealed class StreamJsonOutputFormatter : Microsoft.AspNetCore.Mvc.Formatters.TextOutputFormatter
     {
-        private static readonly JsonSerializerOptions JsonOptions = new()
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        };
-
-        public StreamJsonOutputFormatter()
-        {
-            SupportedMediaTypes.Add("application/json");
-            SupportedMediaTypes.Add("text/json");
-            SupportedMediaTypes.Add("text/plain");
-            SupportedEncodings.Add(Encoding.UTF8);
-        }
+        public StreamJsonOutputFormatter() { SupportedMediaTypes.Add("application/json"); SupportedEncodings.Add(Encoding.UTF8); }
         public override bool CanWriteResult(Microsoft.AspNetCore.Mvc.Formatters.OutputFormatterCanWriteContext context) => true;
-        public override async Task WriteResponseBodyAsync(Microsoft.AspNetCore.Mvc.Formatters.OutputFormatterWriteContext context, Encoding selectedEncoding)
-        {
-            await JsonSerializer.SerializeAsync(context.HttpContext.Response.Body, context.Object, context.ObjectType ?? typeof(object), JsonOptions);
-        }
+        public override Task WriteResponseBodyAsync(Microsoft.AspNetCore.Mvc.Formatters.OutputFormatterWriteContext context, Encoding encoding) =>
+            JsonSerializer.SerializeAsync(context.HttpContext.Response.Body, context.Object, context.ObjectType ?? typeof(object), new JsonSerializerOptions(JsonSerializerDefaults.Web));
     }
-
-    private sealed class TestApplication : WebApplicationFactory<Program>
+    internal sealed class TestApplication : WebApplicationFactory<Program>
     {
+        public FakeDrive Store { get; } = new();
+        public GoogleBackchannel Backchannel { get; } = new();
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Development");
-            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["GoogleDrive:ClientId"] = "test-client",
-                ["GoogleDrive:ClientSecret"] = "test-secret",
-                ["Frontend:Url"] = "https://localhost",
-                ["MongoDB:ConnectionString"] = "mongodb://localhost:27017",
-                ["MongoDB:DatabaseName"] = "test"
+            builder.ConfigureAppConfiguration((_, c) => c.AddInMemoryCollection(new Dictionary<string,string?> {
+                ["GoogleDrive:ClientId"] = "test-client", ["GoogleDrive:ClientSecret"] = "test-secret", ["Frontend:Url"] = "https://localhost"
             }));
-            var databaseName = Guid.NewGuid().ToString();
-            builder.ConfigureServices(services =>
-            {
-                services.PostConfigure<GoogleOptions>(GoogleDefaults.AuthenticationScheme, options =>
-                    options.Backchannel = new HttpClient(new GoogleBackchannel()));
-                services.RemoveAll<IConfigureOptions<KeyManagementOptions>>();
-                services.AddDataProtection().UseEphemeralDataProtectionProvider();
-                services.RemoveAll<ApplicationDbContext>();
-                services.RemoveAll<DbContextOptions<ApplicationDbContext>>();
-                services.AddDbContext<ApplicationDbContext>(options => options.UseInMemoryDatabase(databaseName));
+            builder.ConfigureServices(services => {
                 services.PostConfigure<Microsoft.AspNetCore.Mvc.MvcOptions>(options =>
                 {
                     options.OutputFormatters.RemoveType<Microsoft.AspNetCore.Mvc.Formatters.SystemTextJsonOutputFormatter>();
                     options.OutputFormatters.Insert(0, new StreamJsonOutputFormatter());
-                    options.OutputFormatters.Add(new Microsoft.AspNetCore.Mvc.Formatters.StringOutputFormatter());
                 });
-                var cleanup = services.FirstOrDefault(service => service.ServiceType == typeof(IHostedService)
-                    && service.ImplementationType == typeof(RecycleBinCleanupService));
-                if (cleanup != null) services.Remove(cleanup);
+                services.RemoveAll<IDriveVaultStore>(); services.AddSingleton<IDriveVaultStore>(Store);
+                services.PostConfigure<GoogleOptions>(GoogleDefaults.AuthenticationScheme, o => o.Backchannel = new HttpClient(Backchannel));
             });
         }
     }
